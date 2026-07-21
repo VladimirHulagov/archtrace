@@ -98,13 +98,17 @@ function parseSimpleYAML(text: string): Record<string, any> {
         continue;
       }
 
-      // Remove quotes
-      if ((value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'"))) {
+      // Remove quotes — quoted values are ALWAYS strings
+      const wasQuoted = (value.startsWith('"') && value.endsWith('"')) ||
+                        (value.startsWith("'") && value.endsWith("'"));
+      if (wasQuoted) {
         value = value.slice(1, -1);
+        result[key] = value;  // keep as string, no scalar conversion
+        i++;
+        continue;
       }
 
-      // Parse value
+      // Parse unquoted value
       result[key] = parseScalarValue(value);
       i++;
       continue;
@@ -165,10 +169,13 @@ function parseYAMLArray(lines: string[], startIdx: number): { value: any[]; next
         obj[firstKey] = null;
       } else {
         let v = firstVal;
-        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+        const fq = (v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"));
+        if (fq) {
           v = v.slice(1, -1);
+          obj[firstKey] = v;  // quoted = string
+        } else {
+          obj[firstKey] = parseScalarValue(v);
         }
-        obj[firstKey] = parseScalarValue(v);
       }
 
       // Parse remaining keys of this object (more indented lines)
@@ -182,10 +189,13 @@ function parseYAMLArray(lines: string[], startIdx: number): { value: any[]; next
           if (subVal === '' || subVal === 'null' || subVal === '~') {
             subVal = '';
           }
-          if ((subVal.startsWith('"') && subVal.endsWith('"')) || (subVal.startsWith("'") && subVal.endsWith("'"))) {
+          const sq = (subVal.startsWith('"') && subVal.endsWith('"')) || (subVal.startsWith("'") && subVal.endsWith("'"));
+          if (sq) {
             subVal = subVal.slice(1, -1);
+            obj[subKey] = subVal;  // quoted = string
+          } else {
+            obj[subKey] = parseScalarValue(subVal);
           }
-          obj[subKey] = parseScalarValue(subVal);
           i++;
         } else {
           break;
@@ -199,10 +209,13 @@ function parseYAMLArray(lines: string[], startIdx: number): { value: any[]; next
     const scalarMatch = line.match(/^\s+-\s+(.*)$/);
     if (scalarMatch) {
       let v = scalarMatch[1].trim();
-      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      const sq = (v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"));
+      if (sq) {
         v = v.slice(1, -1);
+        items.push(v);  // quoted = string
+      } else {
+        items.push(parseScalarValue(v));
       }
-      items.push(parseScalarValue(v));
     }
     i++;
   }
