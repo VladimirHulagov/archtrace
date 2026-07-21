@@ -7,12 +7,16 @@ export interface TreeNode {
   status?: string;
   icon?: string;
   description?: string;
+  nodeType?: 'requirement' | 'decision' | 'task';  // ADR type
+  voteTally?: string;  // e.g. "A:4 B:2"
+  connectionKind?: 'parent' | 'cross-ref';  // for connection styling
 }
 
 export interface Connection {
   id: string;
   from: string;
   to: string;
+  kind?: 'parent' | 'cross-ref';
 }
 
 export interface SimpleTreeProps {
