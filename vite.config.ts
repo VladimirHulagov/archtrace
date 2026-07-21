@@ -6,6 +6,7 @@ export default defineConfig({
   server: {
     port: 5233,
     host: '0.0.0.0',
+    allowedHosts: ['archtrace.collaborationism.tech'],
     watch: {
       usePolling: true,
     },
