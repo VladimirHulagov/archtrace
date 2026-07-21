@@ -63,6 +63,22 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+/**
+ * POST /api/client-errors
+ * Receives error reports from the React frontend.
+ */
+app.post('/api/client-errors', (req, res) => {
+  const { message, stack, componentStack, url, timestamp, userAgent } = req.body || {};
+  console.error(`[CLIENT ERROR] ${timestamp || new Date().toISOString()}`);
+  console.error(`  Message: ${message || 'Unknown'}`);
+  console.error(`  URL: ${url || 'N/A'}`);
+  if (userAgent) console.error(`  UA: ${userAgent}`);
+  if (stack) console.error(`  Stack:\n${stack}`);
+  if (componentStack) console.error(`  ComponentStack:\n${componentStack}`);
+  console.error(`[/CLIENT ERROR]`);
+  res.status(204).end();
+});
+
 // ─── Static frontend (production) ─────────────────────────
 
 const distDir = path.resolve(__dirname, '..', 'dist');
