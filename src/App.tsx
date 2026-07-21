@@ -227,7 +227,7 @@ function App() {
           </div>
 
           {/* Vote tally */}
-          {selectedDetail.voters.length > 0 && (
+          {(selectedDetail.voters?.length ?? 0) > 0 && (
             <div style={{ marginBottom: '16px' }}>
               <h4 style={{ marginBottom: '8px', fontSize: '14px' }}>Votes</h4>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
@@ -240,7 +240,7 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {selectedDetail.voters.map((v, i) => (
+                  {selectedDetail.voters?.map((v, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
                       <td style={{ padding: '4px' }}>{v.name}</td>
                       <td style={{ padding: '4px', color: '#666' }}>{v.role}</td>
