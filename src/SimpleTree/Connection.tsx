@@ -139,11 +139,13 @@ export const Connection: React.FC<ConnectionProps> = ({
     return null;
   }
 
-  const offsetClass = offsetIndex === 0 
+  const offsetClass = offsetIndex === 0
     ? styles['connection--offset-1']
     : offsetIndex === 1
     ? styles['connection--offset-2']
     : styles['connection--offset-3'];
+
+  const crossRefClass = connection.kind === 'cross-ref' ? styles['connection--cross-ref'] : '';
 
   const endpointClass = `${styles.endpoint} ${isHovered || isSelected ? styles['endpoint--hover'] : ''}`;
 
@@ -152,7 +154,7 @@ export const Connection: React.FC<ConnectionProps> = ({
       <path
         ref={pathRef}
         d={pathData.path}
-        className={`${styles.connection} ${offsetClass} ${isSelected ? styles['connection--selected'] : ''}`}
+        className={`${styles.connection} ${offsetClass} ${crossRefClass} ${isSelected ? styles['connection--selected'] : ''}`}
         onClick={handleClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}

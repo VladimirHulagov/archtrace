@@ -55,6 +55,8 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
     }
   }, [isEditing]);
 
+  // ─── Drag handling ───────────────────────────────────
+
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (e.button !== 0) return;
@@ -103,6 +105,8 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
     }
   }, [isDragging, handleMouseMove, handleMouseUp]);
 
+  // ─── Click handling ──────────────────────────────────
+
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -121,7 +125,6 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      
       if (isSimpleNode) {
         setIsEditing(true);
       } else {
@@ -130,6 +133,8 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
     },
     [isSimpleNode, node, onDoubleClick]
   );
+
+  // ─── Inline editing ───────────────────────────────────
 
   const handleEditKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -150,27 +155,59 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
     setIsEditing(false);
   }, [node, editText, onUpdate]);
 
+  // ─── Styling ──────────────────────────────────────────
+
+  const statusClass = node.status ? STATUS_MAP[node.status] : '';
+  const statusBorderClass = node.status
+    ? styles[`node--status-${node.status}`] || ''
+    : '';
+
   const nodeClasses = [
     styles.node,
     isSimpleNode ? styles['node--simple'] : styles['node--rich'],
     isSelected && styles['node--selected'],
     isDragging && styles['node--dragging'],
     isConnectionSource && styles['node--selected'],
+    statusBorderClass,
   ]
     .filter(Boolean)
     .join(' ');
 
-  const statusClass = node.status ? STATUS_MAP[node.status] : '';
+  // ─── Vote badge ───────────────────────────────────────
+
+  const voteTally = node.voteTally;
+  let voteBadge: { text: string; cls: string } | null = null;
+  if (voteTally) {
+    const parts = voteTally.split(' ').map(p => {
+      const [opt, w] = p.split(':');
+      return { opt, weight: parseInt(w) || 0 };
+    });
+    if (parts.length > 0) {
+      const sorted = [...parts].sort((a, b) => b.weight - a.weight);
+      const totalWeight = parts.reduce((s, p) => s + p.weight, 0);
+      const topWeight = sorted[0].weight;
+      const isWinning = topWeight > totalWeight / 2;
+      const isSplit = parts.length >= 2 && sorted[0].weight === sorted[1].weight;
+      voteBadge = {
+        text: parts.map(p => `${p.opt}:${p.weight}`).join(' '),
+        cls: isSplit
+          ? styles['node__voteBadge--split']
+          : isWinning
+            ? styles['node__voteBadge--winning']
+            : styles.node__voteBadge,
+      };
+    }
+  }
+
+  // ─── Node style ───────────────────────────────────────
 
   const nodeStyle: React.CSSProperties = {
     left: node.x,
     top: node.y,
-    cursor: isConnecting ? 'crosshair' : canDrag ? 'grab' : 'pointer',
+    cursor: isDragging ? 'grabbing' : isConnecting ? 'crosshair' : canDrag ? 'grab' : 'pointer',
   };
 
-  if (isDragging) {
-    nodeStyle.cursor = 'grabbing';
-  }
+  // ─── Render ───────────────────────────────────────────
 
   return (
     <div
@@ -225,6 +262,11 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
             <div className={styles.node__content}>
               <p className={styles.node__description}>{node.description}</p>
             </div>
+          )}
+          {voteBadge && (
+            <span className={voteBadge.cls} title="Vote tally">
+              {voteBadge.text}
+            </span>
           )}
         </>
       )}

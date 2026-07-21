@@ -8,7 +8,8 @@
     "preview": "vite preview",
     "server": "tsx watch server/index.ts",
     "start": "tsx server/index.ts",
-    "dev:all": "concurrently \"npm run server\" \"npm run dev\""
+    "dev:all": "concurrently \"npm run server\" \"npm run dev\"",
+    "new": "tsx cli/new.ts"
   },
   "dependencies": {
     "react": "^18.2.0",
