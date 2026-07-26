@@ -38,16 +38,18 @@ export function groupByLevel(
 ): TreeNode[][] {
   const adj = buildAdjacencyList(nodes, connections);
   const levels: TreeNode[][] = [];
+  const placed = new Set<string>();
   let currentLevel = getRootNodes(nodes, connections);
   
   while (currentLevel.length > 0) {
     levels.push(currentLevel);
     const nextLevel: TreeNode[] = [];
     for (const node of currentLevel) {
+      placed.add(node.id);
       const children = adj.get(node.id) || [];
       children.forEach(childId => {
         const child = nodes.find(n => n.id === childId);
-        if (child) nextLevel.push(child);
+        if (child && !placed.has(child.id)) nextLevel.push(child);
       });
     }
     currentLevel = nextLevel;

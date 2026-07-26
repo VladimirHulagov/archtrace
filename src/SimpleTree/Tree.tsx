@@ -57,7 +57,12 @@ export const Tree: React.FC<TreeProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const announcementRef = useRef<HTMLDivElement>(null);
 
-  const levels = useMemo(() => groupByLevel(nodes, connections), [nodes, connections]);
+  // Only use parent connections for level grouping (cross-refs create cycles)
+  const parentConnections = useMemo(
+    () => connections.filter(c => !c.kind || c.kind === 'parent'),
+    [connections]
+  );
+  const levels = useMemo(() => groupByLevel(nodes, parentConnections), [nodes, parentConnections]);
   
   const connectionOffsets = useMemo(() => getConnectionOffsets(connections), [connections]);
   

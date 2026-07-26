@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Tree, TreeNode } from './SimpleTree';
 import { fetchGraph, type Graph, type DecisionNode } from './api';
+import { calculatePositions } from './SimpleTree/utils/positions';
 
 // ─── ADR → TreeNode mapping ──────────────────────────────
 
@@ -21,7 +22,7 @@ const TYPE_ICONS: Record<string, string> = {
 function decisionToTreeNode(d: DecisionNode): TreeNode {
   // Build vote summary
   let voteTally = '';
-  if (d.voters.length > 0) {
+  if (d.voters?.length > 0) {
     const tally: Record<string, number> = {};
     for (const v of d.voters) {
       tally[v.vote] = (tally[v.vote] || 0) + v.weight;
@@ -60,13 +61,17 @@ function App() {
   useEffect(() => {
     fetchGraph()
       .then((graph: Graph) => {
-        setNodes(graph.nodes.map(decisionToTreeNode));
-        setConnections(graph.connections.map(c => ({
+        const treeNodes = graph.nodes.map(decisionToTreeNode);
+        const treeConnections = graph.connections.map(c => ({
           id: c.id,
           from: c.from,
           to: c.to,
           kind: c.kind,
-        })));
+        }));
+        const containerWidth = window.innerWidth - 420;
+        const positioned = calculatePositions(treeNodes, treeConnections, containerWidth);
+        setNodes(positioned);
+        setConnections(treeConnections);
         setLoading(false);
       })
       .catch((err) => {
