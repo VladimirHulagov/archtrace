@@ -5,7 +5,7 @@ import { TreeNodeComponent } from './TreeNode';
 import { Connection as ConnectionComponent } from './Connection';
 import { Controls } from './Controls';
 import { Modal } from './Modal';
-import { groupByLevel } from './utils/positions';
+import { groupByLevel, getNodeSize } from './utils/positions';
 import styles from './styles.module.css';
 
 export interface TreeProps extends SimpleTreeProps {
@@ -74,6 +74,18 @@ export const Tree: React.FC<TreeProps> = ({
       offsetIndex: connectionOffsets.get(conn.id) || 0,
     }));
   }, [connections, connectionOffsets]);
+
+  const bounds = useMemo(() => {
+    if (nodes.length === 0) return { width: 0, height: 0 };
+    let maxX = 0;
+    let maxY = 0;
+    nodes.forEach((node) => {
+      const size = getNodeSize(node);
+      maxX = Math.max(maxX, node.x + size.width);
+      maxY = Math.max(maxY, node.y + size.height);
+    });
+    return { width: maxX + 20, height: maxY + 20 };
+  }, [nodes]);
 
   const announce = useCallback((message: string) => {
     if (announcementRef.current) {
@@ -419,7 +431,12 @@ export const Tree: React.FC<TreeProps> = ({
           wrapperClass={styles.transformWrapper}
           contentClass={styles.transformContent}
         >
-          <svg className={styles.connectionLayer}>
+          <svg
+            className={styles.connectionLayer}
+            width={bounds.width}
+            height={bounds.height}
+            style={{ position: 'absolute', top: 0, left: 0 }}
+          >
             {connectionsWithOffsets.map((conn) => (
               <ConnectionComponent
                 key={conn.id}
