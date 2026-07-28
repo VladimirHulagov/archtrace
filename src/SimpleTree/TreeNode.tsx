@@ -125,13 +125,9 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (isSimpleNode) {
-        setIsEditing(true);
-      } else {
-        onDoubleClick(node);
-      }
+      onDoubleClick(node);
     },
-    [isSimpleNode, node, onDoubleClick]
+    [node, onDoubleClick]
   );
 
   // ─── Inline editing ───────────────────────────────────
