@@ -17,23 +17,24 @@ interface ConnectionWithOffset extends Connection {
 }
 
 function getConnectionOffsets(connections: Connection[]): Map<string, number> {
-  const pairCount = new Map<string, number>();
+  // Group by source node: each connection from the same parent gets a sequential offset.
+  // This ensures their horizontal segments are at different Y positions.
+  const sourceCount = new Map<string, number>();
   const offsets = new Map<string, number>();
-  
+
+  // First pass: count children per source
   connections.forEach((conn) => {
-    const key = `${conn.from}-${conn.to}`;
-    const count = pairCount.get(key) || 0;
-    pairCount.set(key, count + 1);
+    sourceCount.set(conn.from, (sourceCount.get(conn.from) || 0) + 1);
   });
-  
-  const pairIndex = new Map<string, number>();
+
+  // Second pass: assign sequential offset per source
+  const sourceIndex = new Map<string, number>();
   connections.forEach((conn) => {
-    const key = `${conn.from}-${conn.to}`;
-    const index = pairIndex.get(key) || 0;
-    pairIndex.set(key, index + 1);
-    offsets.set(conn.id, index);
+    const idx = sourceIndex.get(conn.from) || 0;
+    sourceIndex.set(conn.from, idx + 1);
+    offsets.set(conn.id, idx);
   });
-  
+
   return offsets;
 }
 

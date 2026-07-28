@@ -5,7 +5,8 @@ import styles from './styles.module.css';
 
 const CORNER_RADIUS = 4;
 const ENDPOINT_RADIUS = 5;
-const OFFSET_INCREMENT = 25;
+const OFFSET_STEP = 15;
+const BEND_OFFSET = 20; // distance from node border before horizontal turn
 
 interface ConnectionProps {
   connection: ConnectionType;
@@ -25,59 +26,88 @@ function calculatePath(
   const toSize = getNodeSize(toNode);
 
   const fromX = fromNode.x + fromSize.width / 2;
-  const fromY = fromNode.y + fromSize.height;
+  const fromY = fromNode.y + fromSize.height; // bottom center of source
   const toX = toNode.x + toSize.width / 2;
-  const toY = toNode.y;
+  const toY = toNode.y; // top center of target
 
-  const offset = offsetIndex * OFFSET_INCREMENT;
-  const adjustedFromX = fromX + offset;
-  const adjustedToX = toX + offset;
+  // Each connection gets its own horizontal lane:
+  // bendY = fixed offset from source bottom + offsetIndex * STEP
+  // This ensures parallel connections don't share the same horizontal Y
+  const isBackward = toY < fromY;
+
+  if (isBackward) {
+    // Backward (cross-ref) connection: route BELOW source, then horizontal, then UP to target
+    // Go down from source bottom, then horizontal far below, then up to target top
+    const bendY = fromY + BEND_OFFSET + offsetIndex * OFFSET_STEP;
+    const r = CORNER_RADIUS;
+    const direction = toX > fromX ? 1 : -1;
+    const horizDistance = Math.abs(toX - fromX);
+
+    if (horizDistance < r * 4) {
+      // Nearly vertical: just draw straight (down then up)
+      const path = [
+        `M ${fromX} ${fromY}`,
+        `L ${fromX} ${bendY}`,
+        `L ${toX} ${bendY}`,
+        `L ${toX} ${toY}`,
+      ].join(' ');
+      return { path, fromX, fromY, toX, toY };
+    }
+
+    const effectiveR = Math.min(r, horizDistance / 2);
+    const path = [
+      `M ${fromX} ${fromY}`,
+      `L ${fromX} ${bendY - effectiveR}`,
+      `Q ${fromX} ${bendY} ${fromX + effectiveR * direction} ${bendY}`,
+      `L ${toX - effectiveR * direction} ${bendY}`,
+      `Q ${toX} ${bendY} ${toX} ${bendY - effectiveR}`,
+      `L ${toX} ${toY}`,
+    ].join(' ');
+    return { path, fromX, fromY, toX, toY };
+  }
+
+  // Forward connection: route from source bottom → down → horizontal → down to target top
+  // Each connection uses a unique horizontal lane based on offsetIndex
+  const bendY = fromY + BEND_OFFSET + offsetIndex * OFFSET_STEP;
+
+  // Clamp bendY so it doesn't overshoot the target
+  const clampedBendY = Math.min(bendY, toY - BEND_OFFSET);
 
   const r = CORNER_RADIUS;
+  const direction = toX > fromX ? 1 : -1;
+  const horizDistance = Math.abs(toX - fromX);
 
-  const verticalDistance = toY - fromY;
-  const horizontalDistance = Math.abs(adjustedToX - adjustedFromX);
-
-  if (adjustedFromX === adjustedToX) {
+  if (fromX === toX) {
+    // Straight vertical line
     return {
-      path: `M ${adjustedFromX} ${fromY} L ${adjustedToX} ${toY}`,
-      fromX: adjustedFromX,
-      fromY,
-      toX: adjustedToX,
-      toY,
+      path: `M ${fromX} ${fromY} L ${toX} ${toY}`,
+      fromX, fromY, toX, toY,
     };
   }
 
-  if (verticalDistance <= r * 4) {
-    const direction = adjustedToX > adjustedFromX ? 1 : -1;
+  if (horizDistance < r * 4 || clampedBendY >= toY - r * 2) {
+    // Too close horizontally or vertically for rounded path: simple L-bend
     const path = [
-      `M ${adjustedFromX} ${fromY}`,
-      `L ${adjustedFromX} ${toY}`,
-      `L ${adjustedToX} ${toY}`,
+      `M ${fromX} ${fromY}`,
+      `L ${fromX} ${clampedBendY}`,
+      `L ${toX} ${clampedBendY}`,
+      `L ${toX} ${toY}`,
     ].join(' ');
-
-    return { path, fromX: adjustedFromX, fromY, toX: adjustedToX, toY };
+    return { path, fromX, fromY, toX, toY };
   }
 
-  const midY = (fromY + toY) / 2;
-  const direction = adjustedToX > adjustedFromX ? 1 : -1;
-
-  const effectiveR = Math.min(
-    r,
-    verticalDistance / 2 - 1,
-    horizontalDistance / 2
-  );
+  const effectiveR = Math.min(r, horizDistance / 2, (clampedBendY - fromY) / 2, (toY - clampedBendY) / 2);
 
   const path = [
-    `M ${adjustedFromX} ${fromY}`,
-    `L ${adjustedFromX} ${midY - effectiveR}`,
-    `Q ${adjustedFromX} ${midY} ${adjustedFromX + effectiveR * direction} ${midY}`,
-    `L ${adjustedToX - effectiveR * direction} ${midY}`,
-    `Q ${adjustedToX} ${midY} ${adjustedToX} ${midY + effectiveR}`,
-    `L ${adjustedToX} ${toY}`,
+    `M ${fromX} ${fromY}`,
+    `L ${fromX} ${clampedBendY - effectiveR}`,
+    `Q ${fromX} ${clampedBendY} ${fromX + effectiveR * direction} ${clampedBendY}`,
+    `L ${toX - effectiveR * direction} ${clampedBendY}`,
+    `Q ${toX} ${clampedBendY} ${toX} ${clampedBendY + effectiveR}`,
+    `L ${toX} ${toY}`,
   ].join(' ');
 
-  return { path, fromX: adjustedFromX, fromY, toX: adjustedToX, toY };
+  return { path, fromX, fromY, toX, toY };
 }
 
 export const Connection: React.FC<ConnectionProps> = ({
