@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Tree, TreeNode } from './SimpleTree';
 import { fetchGraph, type Graph, type DecisionNode } from './api';
 import { calculatePositions } from './SimpleTree/utils/positions';
+import ReactMarkdown from 'react-markdown';
 
 // ─── ADR → TreeNode mapping ──────────────────────────────
 
@@ -260,13 +261,7 @@ function App() {
 
           {/* Markdown body */}
           <div style={{ fontSize: '14px', lineHeight: '1.6', color: '#333' }}>
-            <pre style={{
-              whiteSpace: 'pre-wrap',
-              fontFamily: 'inherit',
-              margin: 0,
-            }}>
-              {selectedDetail.body}
-            </pre>
+            <ReactMarkdown>{selectedDetail.body}</ReactMarkdown>
           </div>
 
           <div style={{ marginTop: '20px', paddingTop: '12px', borderTop: '1px solid #e0e0e0', fontSize: '12px', color: '#999' }}>

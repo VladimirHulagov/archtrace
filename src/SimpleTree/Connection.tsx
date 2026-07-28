@@ -5,7 +5,7 @@ import styles from './styles.module.css';
 
 const CORNER_RADIUS = 4;
 const ENDPOINT_RADIUS = 5;
-const OFFSET_INCREMENT = 8;
+const OFFSET_INCREMENT = 25;
 
 interface ConnectionProps {
   connection: ConnectionType;
