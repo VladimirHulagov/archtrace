@@ -5,8 +5,10 @@ import styles from './styles.module.css';
 export interface ModalProps {
   node: TreeNode;
   isOpen: boolean;
-  onSave: (node: TreeNode) => void;
+  onSave?: (node: TreeNode) => void;
   onCancel: () => void;
+  readOnly?: boolean;
+  onEdit?: (node: TreeNode) => void;
 }
 
 const STATUS_OPTIONS = [
@@ -26,7 +28,7 @@ const ICON_OPTIONS = [
   { value: '●', label: 'Circle' },
 ];
 
-export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel }) => {
+export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel, readOnly, onEdit }) => {
   const [title, setTitle] = useState(node.text);
   const [description, setDescription] = useState(node.description || '');
   const [status, setStatus] = useState(node.status || '');
@@ -50,6 +52,7 @@ export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel }) 
   }, [isOpen, node]);
 
   const handleSave = useCallback(() => {
+    if (!onSave) return;
     const trimmedTitle = title.trim();
     if (!trimmedTitle) return;
 
@@ -92,7 +95,7 @@ export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel }) 
     >
       <div className={styles.modal} ref={modalRef}>
         <div className={styles.modal__header}>
-          <h3 className={styles.modal__title} id="modal-title">Edit Node</h3>
+          <h3 className={styles.modal__title} id="modal-title">{readOnly ? 'Node Details' : 'Edit Node'}</h3>
           <button 
             className={styles.modal__close}
             onClick={onCancel}
@@ -106,78 +109,108 @@ export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel }) 
         <div className={styles.modal__body}>
           <div className={styles.field}>
             <label className={styles.field__label} htmlFor="node-title">Title</label>
-            <input
-              id="node-title"
-              ref={titleInputRef}
-              type="text"
-              className={styles.field__input}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Enter node title"
-            />
+            {readOnly ? (
+              <div className={styles.field__readonly}>{title}</div>
+            ) : (
+              <input
+                id="node-title"
+                ref={titleInputRef}
+                type="text"
+                className={styles.field__input}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Enter node title"
+              />
+            )}
           </div>
 
           <div className={styles.field}>
             <label className={styles.field__label} htmlFor="node-description">Description</label>
-            <textarea
-              id="node-description"
-              className={styles.field__textarea}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Enter description (optional)"
-              rows={3}
-            />
+            {readOnly ? (
+              <div className={styles.field__readonly}>{description || '—'}</div>
+            ) : (
+              <textarea
+                id="node-description"
+                className={styles.field__textarea}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Enter description (optional)"
+                rows={3}
+              />
+            )}
           </div>
 
           <div className={styles.field}>
             <label className={styles.field__label} htmlFor="node-status">Status</label>
-            <select
-              id="node-status"
-              className={styles.field__select}
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-            >
-              {STATUS_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+            {readOnly ? (
+              <div className={styles.field__readonly}>{STATUS_OPTIONS.find(o => o.value === status)?.label || 'None'}</div>
+            ) : (
+              <select
+                id="node-status"
+                className={styles.field__select}
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+              >
+                {STATUS_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className={styles.field}>
             <label className={styles.field__label} htmlFor="node-icon">Icon</label>
-            <select
-              id="node-icon"
-              className={styles.field__select}
-              value={icon}
-              onChange={(e) => setIcon(e.target.value)}
-            >
-              {ICON_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.value ? `${opt.value} ${opt.label}` : opt.label}
-                </option>
-              ))}
-            </select>
+            {readOnly ? (
+              <div className={styles.field__readonly}>{icon || 'None'}</div>
+            ) : (
+              <select
+                id="node-icon"
+                className={styles.field__select}
+                value={icon}
+                onChange={(e) => setIcon(e.target.value)}
+              >
+                {ICON_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.value ? `${opt.value} ${opt.label}` : opt.label}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
 
         <div className={styles.modal__footer}>
-          <button
-            className={`${styles.btn} ${styles['btn--secondary']}`}
-            onClick={onCancel}
-            type="button"
-          >
-            Cancel
-          </button>
-          <button
-            className={`${styles.btn} ${styles['btn--primary']}`}
-            onClick={handleSave}
-            disabled={!title.trim()}
-            type="button"
-          >
-            Save
-          </button>
+          {readOnly ? (
+            onEdit && (
+              <button
+                className={`${styles.btn} ${styles['btn--primary']}`}
+                onClick={() => onEdit(node)}
+                type="button"
+              >
+                Edit
+              </button>
+            )
+          ) : (
+            <>
+              <button
+                className={`${styles.btn} ${styles['btn--secondary']}`}
+                onClick={onCancel}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className={`${styles.btn} ${styles['btn--primary']}`}
+                onClick={handleSave}
+                disabled={!title.trim()}
+                type="button"
+              >
+                Save
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

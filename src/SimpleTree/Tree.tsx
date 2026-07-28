@@ -5,7 +5,6 @@ import { TreeNodeComponent } from './TreeNode';
 import { Connection as ConnectionComponent } from './Connection';
 import { Controls } from './Controls';
 import { Modal } from './Modal';
-import { InfoPanel } from './InfoPanel';
 import { groupByLevel, getNodeSize } from './utils/positions';
 import styles from './styles.module.css';
 
@@ -56,7 +55,7 @@ export const Tree: React.FC<TreeProps> = ({
   const [isConnectionMode, setIsConnectionMode] = useState(false);
   const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
   const [editingNode, setEditingNode] = useState<TreeNode | null>(null);
-  const [infoNode, setInfoNode] = useState<TreeNode | null>(null);
+  const [viewNode, setViewNode] = useState<TreeNode | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef<any>(null);
   const announcementRef = useRef<HTMLDivElement>(null);
@@ -99,7 +98,7 @@ export const Tree: React.FC<TreeProps> = ({
     if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains(styles.connectionLayer)) {
       setSelectedNodeId(null);
       setSelectedConnectionId(null);
-      setInfoNode(null);
+      setViewNode(null);
       
       if (isConnectionMode) {
         setIsConnectionMode(false);
@@ -114,7 +113,7 @@ export const Tree: React.FC<TreeProps> = ({
       e.stopPropagation();
       setSelectedConnectionId(null);
       setSelectedNodeId(node.id);
-      setInfoNode(node);
+      setViewNode(node);
       announce(`Node ${node.text} selected`);
       
       if (onNodeClick) {
@@ -127,7 +126,7 @@ export const Tree: React.FC<TreeProps> = ({
   const handleNodeDoubleClick = useCallback(
     (node: TreeNode) => {
       setEditingNode(node);
-      setInfoNode(null);
+      setViewNode(null);
       announce(`Editing node ${node.text}`);
       
       if (onNodeDoubleClick) {
@@ -198,13 +197,13 @@ export const Tree: React.FC<TreeProps> = ({
     [connections, nodes, announce]
   );
 
-  const handleInfoEdit = useCallback(() => {
-    if (infoNode) {
-      setEditingNode(infoNode);
-      setInfoNode(null);
-      announce(`Editing node ${infoNode.text}`);
+  const handleViewEdit = useCallback(() => {
+    if (viewNode) {
+      setEditingNode(viewNode);
+      setViewNode(null);
+      announce(`Editing node ${viewNode.text}`);
     }
-  }, [infoNode, announce]);
+  }, [viewNode, announce]);
 
   const handleAddNode = useCallback(() => {
     if (onAddNode) {
@@ -494,11 +493,13 @@ export const Tree: React.FC<TreeProps> = ({
         onZoomReset={() => transformRef.current?.resetTransform()}
       />
       
-      {infoNode && !editingNode && (
-        <InfoPanel
-          node={infoNode}
-          onClose={() => { setInfoNode(null); setSelectedNodeId(null); }}
-          onEdit={handleInfoEdit}
+      {viewNode && !editingNode && (
+        <Modal
+          node={viewNode}
+          isOpen={!!viewNode}
+          readOnly
+          onEdit={handleViewEdit}
+          onCancel={() => { setViewNode(null); setSelectedNodeId(null); }}
         />
       )}
       
