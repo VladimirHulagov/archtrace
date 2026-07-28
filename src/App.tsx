@@ -181,7 +181,7 @@ function App() {
           onUpdateNode={handleUpdateNode}
           onAddConnection={handleAddConnection}
           onDeleteConnection={handleDeleteConnection}
-          onNodeDoubleClick={(node) => {
+          onNodeClick={(node) => {
             // Fetch full decision detail
             fetch(`/api/decisions/${node.id}`)
               .then(res => res.json())

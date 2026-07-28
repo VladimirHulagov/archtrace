@@ -55,7 +55,6 @@ export const Tree: React.FC<TreeProps> = ({
   const [isConnectionMode, setIsConnectionMode] = useState(false);
   const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
   const [editingNode, setEditingNode] = useState<TreeNode | null>(null);
-  const [viewNode, setViewNode] = useState<TreeNode | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef<any>(null);
   const announcementRef = useRef<HTMLDivElement>(null);
@@ -98,7 +97,6 @@ export const Tree: React.FC<TreeProps> = ({
     if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains(styles.connectionLayer)) {
       setSelectedNodeId(null);
       setSelectedConnectionId(null);
-      setViewNode(null);
       
       if (isConnectionMode) {
         setIsConnectionMode(false);
@@ -113,7 +111,6 @@ export const Tree: React.FC<TreeProps> = ({
       e.stopPropagation();
       setSelectedConnectionId(null);
       setSelectedNodeId(node.id);
-      setViewNode(node);
       announce(`Node ${node.text} selected`);
       
       if (onNodeClick) {
@@ -126,7 +123,6 @@ export const Tree: React.FC<TreeProps> = ({
   const handleNodeDoubleClick = useCallback(
     (node: TreeNode) => {
       setEditingNode(node);
-      setViewNode(null);
       announce(`Editing node ${node.text}`);
       
       if (onNodeDoubleClick) {
@@ -196,14 +192,6 @@ export const Tree: React.FC<TreeProps> = ({
     },
     [connections, nodes, announce]
   );
-
-  const handleViewEdit = useCallback(() => {
-    if (viewNode) {
-      setEditingNode(viewNode);
-      setViewNode(null);
-      announce(`Editing node ${viewNode.text}`);
-    }
-  }, [viewNode, announce]);
 
   const handleAddNode = useCallback(() => {
     if (onAddNode) {
@@ -492,16 +480,6 @@ export const Tree: React.FC<TreeProps> = ({
         onZoomOut={() => transformRef.current?.zoomOut()}
         onZoomReset={() => transformRef.current?.resetTransform()}
       />
-      
-      {viewNode && !editingNode && (
-        <Modal
-          node={viewNode}
-          isOpen={!!viewNode}
-          readOnly
-          onEdit={handleViewEdit}
-          onCancel={() => { setViewNode(null); setSelectedNodeId(null); }}
-        />
-      )}
       
       {editingNode && (
         <Modal
