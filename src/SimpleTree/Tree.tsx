@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { TreeNode, Connection, SimpleTreeProps } from './types';
 import { TreeNodeComponent } from './TreeNode';
 import { Connection as ConnectionComponent } from './Connection';
@@ -55,6 +56,7 @@ export const Tree: React.FC<TreeProps> = ({
   const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
   const [editingNode, setEditingNode] = useState<TreeNode | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const transformRef = useRef<any>(null);
   const announcementRef = useRef<HTMLDivElement>(null);
 
   // Only use parent connections for level grouping (cross-refs create cycles)
@@ -402,35 +404,52 @@ export const Tree: React.FC<TreeProps> = ({
         }}
       />
       
-      <svg className={styles.connectionLayer}>
-        {connectionsWithOffsets.map((conn) => (
-          <ConnectionComponent
-            key={conn.id}
-            connection={conn}
-            nodes={nodes}
-            isSelected={selectedConnectionId === conn.id}
-            offsetIndex={conn.offsetIndex}
-            onClick={handleConnectionClick}
-            onDelete={handleDeleteConnection}
-          />
-        ))}
-      </svg>
-      
-      {nodes.map((node) => (
-        <TreeNodeComponent
-          key={node.id}
-          node={node}
-          isSelected={selectedNodeId === node.id}
-          isConnecting={isConnectionMode}
-          connectionSource={connectionSourceId}
-          onSelect={handleNodeSelect}
-          onDoubleClick={handleNodeDoubleClick}
-          onDrag={handleNodeDrag}
-          onUpdate={handleNodeUpdate}
-          onConnectionStart={handleConnectionStart}
-          onConnectionEnd={handleConnectionEnd}
-        />
-      ))}
+      <TransformWrapper
+        ref={transformRef}
+        minScale={0.2}
+        maxScale={3}
+        initialScale={1}
+        centerOnInit={false}
+        limitToBounds={false}
+        wheel={{ step: 0.1 }}
+        doubleClick={{ mode: 'reset' }}
+        panning={{ velocityDisabled: true }}
+      >
+        <TransformComponent
+          wrapperClass={styles.transformWrapper}
+          contentClass={styles.transformContent}
+        >
+          <svg className={styles.connectionLayer}>
+            {connectionsWithOffsets.map((conn) => (
+              <ConnectionComponent
+                key={conn.id}
+                connection={conn}
+                nodes={nodes}
+                isSelected={selectedConnectionId === conn.id}
+                offsetIndex={conn.offsetIndex}
+                onClick={handleConnectionClick}
+                onDelete={handleDeleteConnection}
+              />
+            ))}
+          </svg>
+          
+          {nodes.map((node) => (
+            <TreeNodeComponent
+              key={node.id}
+              node={node}
+              isSelected={selectedNodeId === node.id}
+              isConnecting={isConnectionMode}
+              connectionSource={connectionSourceId}
+              onSelect={handleNodeSelect}
+              onDoubleClick={handleNodeDoubleClick}
+              onDrag={handleNodeDrag}
+              onUpdate={handleNodeUpdate}
+              onConnectionStart={handleConnectionStart}
+              onConnectionEnd={handleConnectionEnd}
+            />
+          ))}
+        </TransformComponent>
+      </TransformWrapper>
       
       <Controls
         selectedNodeId={selectedNodeId}
@@ -442,6 +461,9 @@ export const Tree: React.FC<TreeProps> = ({
         onToggleConnectMode={handleToggleConnectMode}
         onDeleteConnection={handleDeleteConnection}
         onCancelConnection={handleCancelConnection}
+        onZoomIn={() => transformRef.current?.zoomIn()}
+        onZoomOut={() => transformRef.current?.zoomOut()}
+        onZoomReset={() => transformRef.current?.resetTransform()}
       />
       
       {editingNode && (

@@ -11,6 +11,9 @@ export interface ControlsProps {
   onToggleConnectMode: () => void;
   onDeleteConnection: () => void;
   onCancelConnection?: () => void;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
+  onZoomReset?: () => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -23,6 +26,9 @@ export const Controls: React.FC<ControlsProps> = ({
   onToggleConnectMode,
   onDeleteConnection,
   onCancelConnection,
+  onZoomIn,
+  onZoomOut,
+  onZoomReset,
 }) => {
   const canDeleteNode = selectedNodeId !== null;
   const canDeleteConnection = selectedConnectionId !== null;
@@ -80,6 +86,41 @@ export const Controls: React.FC<ControlsProps> = ({
       >
         <span className={styles['controls__btn--icon']}>✕</span>
       </button>
+
+      {onZoomIn && onZoomOut && (
+        <>
+          <span className={styles.controls__divider} />
+          <button
+            type="button"
+            className={styles.controls__btn}
+            onClick={onZoomIn}
+            title="Zoom in"
+            aria-label="Zoom in"
+          >
+            <span className={styles['controls__btn--icon']}>🔍+</span>
+          </button>
+
+          <button
+            type="button"
+            className={styles.controls__btn}
+            onClick={onZoomOut}
+            title="Zoom out"
+            aria-label="Zoom out"
+          >
+            <span className={styles['controls__btn--icon']}>🔍−</span>
+          </button>
+
+          <button
+            type="button"
+            className={styles.controls__btn}
+            onClick={onZoomReset}
+            title="Reset zoom"
+            aria-label="Reset zoom"
+          >
+            <span className={styles['controls__btn--icon']}>⤢</span>
+          </button>
+        </>
+      )}
     </div>
   );
 };

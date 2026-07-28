@@ -1,30 +1,36 @@
-version: "3.8"
-
 services:
-  server:
+  archtrace:
     build: .
-    command: npm run start
-    ports:
-      - "3001:3001"
-    volumes:
-      - ./decisions:/app/decisions
-    environment:
-      - PORT=3001
+    container_name: archtrace
     restart: unless-stopped
-
-  frontend:
-    build: .
-    command: npm run dev
-    ports:
-      - "5233:5233"
     volumes:
+      # Source — bind-mounted so host edits trigger HMR (frontend) and
+      # tsx watch (Express) without rebuilding/restarting the container.
       - ./src:/app/src
+      - ./server:/app/server
+      - ./cli:/app/cli
+      - ./decisions:/app/decisions
+      # Vite / TS entrypoints and config (live-edited).
       - ./index.html:/app/index.html
       - ./vite.config.ts:/app/vite.config.ts
+      - ./vitest.config.ts:/app/vitest.config.ts
       - ./tsconfig.json:/app/tsconfig.json
       - ./tsconfig.node.json:/app/tsconfig.node.json
-    depends_on:
-      - server
+      # NOTE: node_modules intentionally NOT mounted — comes from the image
+      # (avoids host/container platform mismatch; rebuild to change deps).
     environment:
-      - CHOKIDAR_USEPOLLING=true
-    restart: unless-stopped
+      - CHOKIDAR_USEPOLLING=true   # reliable FS events across the bind mount
+      - PORT=3001                  # Express; Vite proxies /api -> http://localhost:3001
+    labels:
+      docker-guard.allow: "true"
+      traefik.enable: "true"
+      traefik.http.routers.archtrace.rule: Host(`archtrace.collaborationism.tech`)
+      traefik.http.routers.archtrace.entrypoints: websecure
+      traefik.http.routers.archtrace.tls.certresolver: myresolver
+      traefik.http.services.archtrace.loadbalancer.server.port: "5233"
+    networks:
+      - traefik-public
+
+networks:
+  traefik-public:
+    external: true
