@@ -56,6 +56,7 @@ function App() {
   const [selectedDetail, setSelectedDetail] = useState<DecisionNode | null>(null);
   const nodeIdCounter = useRef(1000);
   const connectionIdCounter = useRef(1000);
+  const swipeStartX = useRef<number | null>(null);
 
   // ─── Fetch graph on mount ──────────────────────────────
 
@@ -69,7 +70,7 @@ function App() {
           to: c.to,
           kind: c.kind,
         }));
-        const containerWidth = window.innerWidth - 420;
+        const containerWidth = window.innerWidth;
         const positioned = calculatePositions(treeNodes, treeConnections, containerWidth);
         setNodes(positioned);
         setConnections(treeConnections);
@@ -194,15 +195,26 @@ function App() {
 
       {/* ─── Detail Panel ────────────────────────────────── */}
       {selectedDetail && (
-        <div style={{
-          width: '400px',
-          height: '100vh',
-          overflowY: 'auto',
-          borderLeft: '1px solid #e0e0e0',
-          padding: '20px',
-          background: '#fafafa',
-          flexShrink: 0,
-        }}>
+        <div
+          style={{
+            width: '400px',
+            height: '100vh',
+            overflowY: 'auto',
+            borderLeft: '1px solid #e0e0e0',
+            padding: '20px',
+            background: '#fafafa',
+            flexShrink: 0,
+            touchAction: 'pan-y',
+          }}
+          onTouchStart={(e) => { swipeStartX.current = e.touches[0].clientX; }}
+          onTouchEnd={(e) => {
+            if (swipeStartX.current !== null) {
+              const deltaX = e.changedTouches[0].clientX - swipeStartX.current;
+              if (deltaX < -50) setSelectedDetail(null);
+              swipeStartX.current = null;
+            }
+          }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <h2 style={{ margin: 0, fontSize: '18px' }}>
               {STATUS_ICONS[selectedDetail.status] || '📄'} ADR-{selectedDetail.id}

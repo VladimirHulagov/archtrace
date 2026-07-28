@@ -5,8 +5,9 @@ import styles from './styles.module.css';
 
 const CORNER_RADIUS = 4;
 const ENDPOINT_RADIUS = 5;
-const OFFSET_STEP = 15;
-const BEND_OFFSET = 20; // distance from node border before horizontal turn
+const LANE_STEP = 12;
+const BEND_MARGIN = 15;
+const BACKWARD_SIDE_OFFSET = 50;
 
 interface ConnectionProps {
   connection: ConnectionType;
@@ -26,84 +27,57 @@ function calculatePath(
   const toSize = getNodeSize(toNode);
 
   const fromX = fromNode.x + fromSize.width / 2;
-  const fromY = fromNode.y + fromSize.height; // bottom center of source
+  const fromY = fromNode.y + fromSize.height;
   const toX = toNode.x + toSize.width / 2;
-  const toY = toNode.y; // top center of target
+  const toY = toNode.y;
 
-  // Each connection gets its own horizontal lane:
-  // bendY = fixed offset from source bottom + offsetIndex * STEP
-  // This ensures parallel connections don't share the same horizontal Y
-  const isBackward = toY < fromY;
+  const isForward = toY >= fromY;
 
-  if (isBackward) {
-    // Backward (cross-ref) connection: route BELOW source, then horizontal, then UP to target
-    // Go down from source bottom, then horizontal far below, then up to target top
-    const bendY = fromY + BEND_OFFSET + offsetIndex * OFFSET_STEP;
-    const r = CORNER_RADIUS;
-    const direction = toX > fromX ? 1 : -1;
-    const horizDistance = Math.abs(toX - fromX);
+  if (!isForward) {
+    // Backward (cross-ref): route AROUND the right side to avoid crossing nodes.
+    // Each backward connection uses its own lane on the right margin.
+    const rightX = Math.max(fromNode.x + fromSize.width, toNode.x + toSize.width) 
+                   + BACKWARD_SIDE_OFFSET + offsetIndex * LANE_STEP;
+    const fromBendY = fromY + BEND_MARGIN;
+    const toBendY = toY - BEND_MARGIN;
 
-    if (horizDistance < r * 4) {
-      // Nearly vertical: just draw straight (down then up)
-      const path = [
-        `M ${fromX} ${fromY}`,
-        `L ${fromX} ${bendY}`,
-        `L ${toX} ${bendY}`,
-        `L ${toX} ${toY}`,
-      ].join(' ');
-      return { path, fromX, fromY, toX, toY };
-    }
-
-    const effectiveR = Math.min(r, horizDistance / 2);
     const path = [
       `M ${fromX} ${fromY}`,
-      `L ${fromX} ${bendY - effectiveR}`,
-      `Q ${fromX} ${bendY} ${fromX + effectiveR * direction} ${bendY}`,
-      `L ${toX - effectiveR * direction} ${bendY}`,
-      `Q ${toX} ${bendY} ${toX} ${bendY - effectiveR}`,
+      `L ${fromX} ${fromBendY}`,
+      `L ${rightX} ${fromBendY}`,
+      `L ${rightX} ${toBendY}`,
+      `L ${toX} ${toBendY}`,
       `L ${toX} ${toY}`,
     ].join(' ');
     return { path, fromX, fromY, toX, toY };
   }
 
-  // Forward connection: route from source bottom → down → horizontal → down to target top
-  // Each connection uses a unique horizontal lane based on offsetIndex
-  const bendY = fromY + BEND_OFFSET + offsetIndex * OFFSET_STEP;
-
-  // Clamp bendY so it doesn't overshoot the target
-  const clampedBendY = Math.min(bendY, toY - BEND_OFFSET);
-
-  const r = CORNER_RADIUS;
-  const direction = toX > fromX ? 1 : -1;
-  const horizDistance = Math.abs(toX - fromX);
+  // Forward connection: route through the gap between levels.
+  // Global lane: offsetIndex is unique within the source's level band.
+  const gap = toY - fromY;
+  const laneStep = Math.min(LANE_STEP, (gap - 2 * BEND_MARGIN) / Math.max(offsetIndex + 1, 1));
+  const bendY = fromY + BEND_MARGIN + offsetIndex * laneStep;
+  const clampedBendY = Math.max(fromY + CORNER_RADIUS * 2, Math.min(bendY, toY - CORNER_RADIUS * 2));
 
   if (fromX === toX) {
-    // Straight vertical line
-    return {
-      path: `M ${fromX} ${fromY} L ${toX} ${toY}`,
-      fromX, fromY, toX, toY,
-    };
+    return { path: `M ${fromX} ${fromY} L ${toX} ${toY}`, fromX, fromY, toX, toY };
   }
 
-  if (horizDistance < r * 4 || clampedBendY >= toY - r * 2) {
-    // Too close horizontally or vertically for rounded path: simple L-bend
-    const path = [
-      `M ${fromX} ${fromY}`,
-      `L ${fromX} ${clampedBendY}`,
-      `L ${toX} ${clampedBendY}`,
-      `L ${toX} ${toY}`,
-    ].join(' ');
+  const direction = toX > fromX ? 1 : -1;
+  const horizDist = Math.abs(toX - fromX);
+  const r = Math.min(CORNER_RADIUS, horizDist / 2, (clampedBendY - fromY) / 2, (toY - clampedBendY) / 2);
+
+  if (r < 2) {
+    const path = `M ${fromX} ${fromY} L ${fromX} ${clampedBendY} L ${toX} ${clampedBendY} L ${toX} ${toY}`;
     return { path, fromX, fromY, toX, toY };
   }
-
-  const effectiveR = Math.min(r, horizDistance / 2, (clampedBendY - fromY) / 2, (toY - clampedBendY) / 2);
 
   const path = [
     `M ${fromX} ${fromY}`,
-    `L ${fromX} ${clampedBendY - effectiveR}`,
-    `Q ${fromX} ${clampedBendY} ${fromX + effectiveR * direction} ${clampedBendY}`,
-    `L ${toX - effectiveR * direction} ${clampedBendY}`,
-    `Q ${toX} ${clampedBendY} ${toX} ${clampedBendY + effectiveR}`,
+    `L ${fromX} ${clampedBendY - r}`,
+    `Q ${fromX} ${clampedBendY} ${fromX + r * direction} ${clampedBendY}`,
+    `L ${toX - r * direction} ${clampedBendY}`,
+    `Q ${toX} ${clampedBendY} ${toX} ${clampedBendY + r}`,
     `L ${toX} ${toY}`,
   ].join(' ');
 

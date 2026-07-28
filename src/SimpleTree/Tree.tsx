@@ -16,22 +16,28 @@ interface ConnectionWithOffset extends Connection {
   offsetIndex: number;
 }
 
-function getConnectionOffsets(connections: Connection[]): Map<string, number> {
-  // Group by source node: each connection from the same parent gets a sequential offset.
-  // This ensures their horizontal segments are at different Y positions.
-  const sourceCount = new Map<string, number>();
+function getConnectionOffsets(connections: Connection[], nodes: TreeNode[]): Map<string, number> {
+  // Group connections by source's vertical position (rounded to nearest level).
+  // Within each band, assign sequential lane indices so horizontal segments
+  // are at different Y positions with uniform spacing.
+  const nodeMap = new Map(nodes.map(n => [n.id, n]));
+  
+  // Round Y to band key (every 10px)
+  const bandIndices = new Map<string, number>();
   const offsets = new Map<string, number>();
 
-  // First pass: count children per source
+  // Separate forward and backward connections into different lane pools
   connections.forEach((conn) => {
-    sourceCount.set(conn.from, (sourceCount.get(conn.from) || 0) + 1);
-  });
-
-  // Second pass: assign sequential offset per source
-  const sourceIndex = new Map<string, number>();
-  connections.forEach((conn) => {
-    const idx = sourceIndex.get(conn.from) || 0;
-    sourceIndex.set(conn.from, idx + 1);
+    const fromNode = nodeMap.get(conn.from);
+    const toNode = nodeMap.get(conn.to);
+    if (!fromNode || !toNode) return;
+    
+    const fromBottom = fromNode.y + (fromNode.type === 'rich' ? 80 : 50);
+    const isForward = toNode.y >= fromBottom;
+    const bandKey = `${Math.round(fromBottom / 10)}_${isForward ? 'f' : 'b'}`;
+    
+    const idx = bandIndices.get(bandKey) || 0;
+    bandIndices.set(bandKey, idx + 1);
     offsets.set(conn.id, idx);
   });
 
@@ -67,7 +73,7 @@ export const Tree: React.FC<TreeProps> = ({
   );
   const levels = useMemo(() => groupByLevel(nodes, parentConnections), [nodes, parentConnections]);
   
-  const connectionOffsets = useMemo(() => getConnectionOffsets(connections), [connections]);
+  const connectionOffsets = useMemo(() => getConnectionOffsets(connections, nodes), [connections, nodes]);
   
   const connectionsWithOffsets = useMemo((): ConnectionWithOffset[] => {
     return connections.map((conn) => ({

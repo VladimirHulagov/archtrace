@@ -4,8 +4,8 @@ const NODE_WIDTH = 120;
 const NODE_HEIGHT = 50;
 const RICH_NODE_WIDTH = 200;
 const RICH_NODE_HEIGHT = 80;
-const VERTICAL_GAP = 50;
-const HORIZONTAL_GAP = 100;
+const VERTICAL_GAP = 70;
+const HORIZONTAL_GAP = 40;
 const PADDING = 20;
 
 export function getNodeSize(node: TreeNode): { width: number; height: number } {
