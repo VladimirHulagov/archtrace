@@ -187,6 +187,7 @@ function App() {
           onAddConnection={handleAddConnection}
           onDeleteConnection={handleDeleteConnection}
           edgePoints={edgePoints}
+          onDeselect={() => setSelectedDetail(null)}
           onNodeClick={(node) => {
             // Fetch full decision detail
             fetch(`/api/decisions/${node.id}`)

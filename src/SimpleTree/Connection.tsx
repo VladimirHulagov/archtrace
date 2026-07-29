@@ -5,6 +5,38 @@ import styles from './styles.module.css';
 
 const ENDPOINT_RADIUS = 5;
 const CORNER_RADIUS = 10;
+const LANE_MIN_STEP = 12; // minimum px between parallel horizontal segments
+
+// Module-level lane tracker: ensures unique bendY per source-Y band
+const laneTracker = new Map<string, number[]>();
+
+function getUniqueBendY(bandKey: string, idealY: number): number {
+  let lanes = laneTracker.get(bandKey);
+  if (!lanes) { lanes = []; laneTracker.set(bandKey, lanes); }
+
+  // Try idealY first, then nudge until we find a gap
+  let bendY = idealY;
+  let attempts = 0;
+  while (attempts < 50) {
+    const tooClose = lanes.some(y => Math.abs(y - bendY) < LANE_MIN_STEP);
+    if (!tooClose) break;
+    bendY += LANE_MIN_STEP;
+    attempts++;
+  }
+  lanes.push(bendY);
+  // Keep lanes sorted for deterministic behavior
+  lanes.sort((a, b) => a - b);
+  return bendY;
+}
+
+// Reset lanes when nodes/connections change (called from useMemo)
+let laneResetKey = '';
+export function resetLanes(key: string) {
+  if (key !== laneResetKey) {
+    laneTracker.clear();
+    laneResetKey = key;
+  }
+}
 
 interface ConnectionProps {
   connection: ConnectionType;
@@ -20,79 +52,53 @@ interface ConnectionProps {
  * Force a diagonal segment between two points into an orthogonal L-bend.
  * Returns intermediate points to insert between p1 and p2.
  */
-function orthogonalize(p1: Point, p2: Point): Point[] {
-  const dx = Math.abs(p2.x - p1.x);
-  const dy = Math.abs(p2.y - p1.y);
-  // Already orthogonal (or nearly)
-  if (dx < 1 || dy < 1) return [];
-  // Go vertical to p2.y first, then horizontal — preserves dagre Y separation
-  return [{ x: p1.x, y: p2.y }];
-}
-
 /**
- * Build a smooth orthogonal SVG path from dagre waypoints.
- * Step 1: Expand any diagonal segments into orthogonal L-bends.
- * Step 2: Round corners with Q curves.
+ * Build a strictly orthogonal path: down → horizontal → down.
+ * Uses a lane system to guarantee no two horizontal segments share the same Y.
+ * Guarantees vertical entry/exit at top/bottom centers.
  */
-function buildPath(rawPoints: Point[], fromNode: TreeNode, toNode: TreeNode): string {
-  if (rawPoints.length === 0) return '';
-
-  // Snap endpoints: start = source bottom-center, end = target top-center
+function buildPath(rawPoints: Point[], fromNode: TreeNode, toNode: TreeNode, laneKey: string): string {
   const fromSize = getNodeSize(fromNode);
   const toSize = getNodeSize(toNode);
-  const snapped: Point[] = [...rawPoints];
-  snapped[0] = { x: fromNode.x + fromSize.width / 2, y: fromNode.y + fromSize.height };
-  snapped[snapped.length - 1] = { x: toNode.x + toSize.width / 2, y: toNode.y };
 
-  // Step 1: Orthogonalize — expand diagonals into H+V segments
-  const points: Point[] = [snapped[0]];
-  for (let i = 1; i < snapped.length; i++) {
-    const intermediates = orthogonalize(snapped[i - 1], snapped[i]);
-    points.push(...intermediates, snapped[i]);
+  const fromX = fromNode.x + fromSize.width / 2;
+  const fromY = fromNode.y + fromSize.height;
+  const toX = toNode.x + toSize.width / 2;
+  const toY = toNode.y;
+
+  if (Math.abs(fromX - toX) < 1) {
+    return `M ${fromX} ${fromY} L ${toX} ${toY}`;
   }
 
-  if (points.length <= 2) {
-    return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+  // Ideal bendY from dagre waypoints or midpoint
+  let idealBend: number;
+  if (rawPoints.length >= 3) {
+    idealBend = rawPoints[Math.floor(rawPoints.length / 2)].y;
+  } else if (rawPoints.length === 2) {
+    idealBend = (rawPoints[0].y + rawPoints[1].y) / 2;
+  } else {
+    idealBend = (fromY + toY) / 2;
   }
 
-  // Step 2: Round corners
-  const path: string[] = [`M ${points[0].x} ${points[0].y}`];
+  // Clamp to gap
+  const minBend = fromY + CORNER_RADIUS * 2 + 5;
+  const maxBend = toY - CORNER_RADIUS * 2 - 5;
+  idealBend = Math.max(minBend, Math.min(idealBend, maxBend));
 
-  for (let i = 1; i < points.length - 1; i++) {
-    const prev = points[i - 1];
-    const curr = points[i];
-    const next = points[i + 1];
+  // Get unique lane Y — no overlap with other connections in this band
+  const bendY = getUniqueBendY(laneKey, idealBend);
 
-    const dx1 = curr.x - prev.x;
-    const dy1 = curr.y - prev.y;
-    const dx2 = next.x - curr.x;
-    const dy2 = next.y - curr.y;
+  const r = Math.min(CORNER_RADIUS, Math.abs(bendY - fromY) / 2, Math.abs(toY - bendY) / 2);
+  const direction = toX > fromX ? 1 : -1;
 
-    const len1 = Math.hypot(dx1, dy1);
-    const len2 = Math.hypot(dx2, dy2);
-
-    const sameDir = (dx1 === 0) === (dx2 === 0) && (dy1 === 0) === (dy2 === 0)
-      && Math.sign(dx1) === Math.sign(dx2) && Math.sign(dy1) === Math.sign(dy2);
-
-    if (sameDir || len1 === 0 || len2 === 0) {
-      path.push(`L ${curr.x} ${curr.y}`);
-      continue;
-    }
-
-    const r = Math.min(CORNER_RADIUS, len1 / 2, len2 / 2);
-    const p1x = curr.x - (dx1 / len1) * r;
-    const p1y = curr.y - (dy1 / len1) * r;
-    const p2x = curr.x + (dx2 / len2) * r;
-    const p2y = curr.y + (dy2 / len2) * r;
-
-    path.push(`L ${p1x} ${p1y}`);
-    path.push(`Q ${curr.x} ${curr.y} ${p2x} ${p2y}`);
-  }
-
-  const last = points[points.length - 1];
-  path.push(`L ${last.x} ${last.y}`);
-
-  return path.join(' ');
+  return [
+    `M ${fromX} ${fromY}`,
+    `L ${fromX} ${bendY - r}`,
+    `Q ${fromX} ${bendY} ${fromX + r * direction} ${bendY}`,
+    `L ${toX - r * direction} ${bendY}`,
+    `Q ${toX} ${bendY} ${toX} ${bendY + r}`,
+    `L ${toX} ${toY}`,
+  ].join(' ');
 }
 
 export const Connection: React.FC<ConnectionProps> = ({
@@ -107,7 +113,13 @@ export const Connection: React.FC<ConnectionProps> = ({
   const pathRef = useRef<SVGPathElement>(null);
   const [isHovered, setIsHovered] = React.useState(false);
 
-  const pathData = useMemo(() => buildPath(points, fromNode, toNode), [points, fromNode, toNode]);
+  const laneKey = useMemo(() => {
+    const fromY = Math.round(fromNode.y);
+    const toY = Math.round(toNode.y);
+    return `${Math.min(fromY, toY)}-${Math.max(fromY, toY)}`;
+  }, [fromNode.y, toNode.y]);
+  
+  const pathData = useMemo(() => buildPath(points, fromNode, toNode, laneKey), [points, fromNode, toNode, laneKey]);
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {

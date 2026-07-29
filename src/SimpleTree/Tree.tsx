@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { TreeNode, SimpleTreeProps } from './types';
 import { TreeNodeComponent } from './TreeNode';
-import { Connection as ConnectionComponent } from './Connection';
+import { Connection as ConnectionComponent, resetLanes } from './Connection';
 import { Controls } from './Controls';
 import { Modal } from './Modal';
 import { groupByLevel, getNodeSize } from './utils/positions';
@@ -11,6 +11,7 @@ import styles from './styles.module.css';
 export interface TreeProps extends SimpleTreeProps {
   className?: string;
   edgePoints?: Map<string, import('./types').Point[]>;
+  onDeselect?: () => void;
 }
 
 // Edge points are computed by dagre and passed via edgePoints prop
@@ -27,6 +28,7 @@ export const Tree: React.FC<TreeProps> = ({
   onAddConnection,
   onDeleteConnection,
   edgePoints,
+  onDeselect,
   className,
 }) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -70,6 +72,8 @@ export const Tree: React.FC<TreeProps> = ({
     if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains(styles.connectionLayer)) {
       setSelectedNodeId(null);
       setSelectedConnectionId(null);
+      
+      if (onDeselect) onDeselect();
       
       if (isConnectionMode) {
         setIsConnectionMode(false);
@@ -409,6 +413,7 @@ export const Tree: React.FC<TreeProps> = ({
             height={bounds.height}
             style={{ position: 'absolute', top: 0, left: 0 }}
           >
+            {(() => { resetLanes(`${nodes.length}-${connections.length}`); return null; })()}
             {connections.map((conn) => {
               const fromNode = nodeMap.get(conn.from);
               const toNode = nodeMap.get(conn.to);

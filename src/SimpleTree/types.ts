@@ -35,6 +35,7 @@ export interface SimpleTreeProps {
   onUpdateNode?: (node: TreeNode) => void;
   onAddConnection?: (fromId: string, toId: string) => void;
   onDeleteConnection?: (connectionId: string) => void;
+  onDeselect?: () => void;
   width?: number;
   height?: number;
 }
