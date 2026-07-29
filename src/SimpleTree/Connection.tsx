@@ -69,7 +69,10 @@ function buildPath(
   const fromSize = getNodeSize(fromNode);
   const toSize = getNodeSize(toNode);
 
-  const fromY = fromNode.y + fromSize.height;
+  // Account for vote sector bar (14px) at bottom of rich nodes
+  const hasSectors = fromNode.voteSectors && fromNode.voteSectors.length > 0;
+  const sectorHeight = hasSectors ? 6 : 0; // 14px bar, but 8px overlaps with node padding
+  const fromY = fromNode.y + fromSize.height + sectorHeight;
   const toY = toNode.y;
   // Exit from the winning vote sector's center position
   let fromX: number;

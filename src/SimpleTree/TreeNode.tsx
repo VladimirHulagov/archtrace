@@ -259,35 +259,64 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
               <p className={styles.node__description}>{node.description}</p>
             </div>
           )}
-                  {voteBadge && (
-            <span className={voteBadge.cls} title="Vote tally" style={{ fontSize: '11px', padding: '1px 4px' }}>
-              {voteBadge.text}
-            </span>
-          )}
-          {node.voteSectors && node.voteSectors.length > 0 && (
-            <div style={{
-              display: 'flex',
-              height: '6px',
-              borderRadius: '0 0 6px 6px',
-              overflow: 'hidden',
-              marginTop: 'auto',
-              marginLeft: '-12px',
-              marginRight: '-12px',
-              marginBottom: '-8px',
-            }}>
-              {node.voteSectors.map(sec => (
-                <div
-                  key={sec.option}
-                  style={{
-                    flex: sec.weight,
-                    backgroundColor: sec.color,
-                    opacity: node.winnerVote && node.winnerVote !== sec.option ? 0.35 : 1,
-                  }}
-                  title={`${sec.option}: ${sec.weight}`}
-                />
-              ))}
-            </div>
-          )}
+        
+          {node.voteSectors && node.voteSectors.length > 0 && (() => {
+            const totalWeight = node.voteSectors.reduce((s, sec) => s + sec.weight, 0);
+            return (
+              <div style={{
+                display: 'flex',
+                height: '14px',
+                borderRadius: '0 0 6px 6px',
+                overflow: 'hidden',
+                marginTop: 'auto',
+                marginLeft: '-12px',
+                marginRight: '-12px',
+                marginBottom: '-8px',
+              }}>
+                {node.voteSectors.map(sec => {
+                  const isWinner = node.winnerVote === sec.option;
+                  return (
+                    <div
+                      key={sec.option}
+                      style={{
+                        flex: sec.weight,
+                        backgroundColor: sec.color,
+                        opacity: isWinner ? 1 : 0.3,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        position: 'relative',
+                      }}
+                    >
+                      <span style={{
+                        fontSize: '9px',
+                        fontWeight: 'bold',
+                        color: '#fff',
+                        textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {sec.option}:{sec.weight}
+                      </span>
+                      {isWinner && (
+                        <span style={{
+                          position: 'absolute',
+                          bottom: '-4px',
+                          left: '50%',
+                          transform: 'translateX(-50%)',
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          backgroundColor: '#fff',
+                          border: `2px solid ${sec.color}`,
+                          zIndex: 10,
+                        }} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </>
       )}
     </div>
