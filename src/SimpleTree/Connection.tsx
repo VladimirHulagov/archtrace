@@ -10,7 +10,7 @@ const LANE_MIN_STEP = 14;
 const LANE_MARGIN = 20;
 const BACKWARD_MARGIN = 60;
 
-// Module-level lane tracker
+// Module-level lane tracker: ensures unique bendY per band
 const laneTracker = new Map<string, number[]>();
 
 function getUniqueBendY(bandKey: string, idealY: number, min: number, max: number): number {
@@ -19,11 +19,11 @@ function getUniqueBendY(bandKey: string, idealY: number, min: number, max: numbe
 
   let bendY = Math.max(min, Math.min(idealY, max));
   let attempts = 0;
-  while (attempts < 100) {
+  while (attempts < 200) {
     const tooClose = lanes.some(y => Math.abs(y - bendY) < LANE_MIN_STEP);
     if (!tooClose) break;
     bendY += LANE_MIN_STEP;
-    if (bendY > max) bendY = min + (bendY - max) * 0.5;
+    if (bendY > max) bendY = min + LANE_MIN_STEP;
     attempts++;
   }
   lanes.push(bendY);
@@ -50,9 +50,36 @@ interface ConnectionProps {
 }
 
 /**
+ * Rounded corner helper: returns the path segment for a smooth turn.
+ */
+function roundedCorner(
+  inX: number, inY: number,
+  cornerX: number, cornerY: number,
+  outX: number, outY: number,
+  r: number,
+): string {
+  const dx1 = cornerX - inX;
+  const dy1 = cornerY - inY;
+  const dx2 = outX - cornerX;
+  const dy2 = outY - cornerY;
+  const len1 = Math.hypot(dx1, dy1);
+  const len2 = Math.hypot(dx2, dy2);
+
+  if (len1 === 0 || len2 === 0) return `L ${cornerX} ${cornerY}`;
+
+  const rr = Math.min(r, len1 / 2, len2 / 2);
+  const p1x = cornerX - (dx1 / len1) * rr;
+  const p1y = cornerY - (dy1 / len1) * rr;
+  const p2x = cornerX + (dx2 / len2) * rr;
+  const p2y = cornerY + (dy2 / len2) * rr;
+
+  return `L ${p1x} ${p1y} Q ${cornerX} ${cornerY} ${p2x} ${p2y}`;
+}
+
+/**
  * Build orthogonal path with guaranteed vertical entry/exit at node edges.
- * Forward: down → H → down (lane-separated)
- * Backward: down → right → up → left → down (around right side)
+ * Forward: down → H(lane) → down
+ * Backward: down → right side → up → left → down (around right side)
  */
 function buildPath(
   _rawPoints: Point[],
@@ -81,29 +108,32 @@ function buildPath(
   const isBackward = toY <= fromY;
 
   if (isBackward) {
-    // Route around the right side
+    // Route around the right side: down → right → up → left → down
     const rightX = Math.max(fromNode.x + fromSize.width, toNode.x + toSize.width) + BACKWARD_MARGIN;
     const downY = fromY + LANE_MARGIN;
     const upY = toY - LANE_MARGIN;
-
     const r = Math.min(CORNER_RADIUS, LANE_MARGIN / 2);
-    const dirR = 1;  // always go right
 
-    return [
-      `M ${fromX} ${fromY}`,
-      `L ${fromX} ${downY - r}`,
-      `Q ${fromX} ${downY} ${fromX + r * dirR} ${downY}`,
-      `L ${rightX - r * dirR} ${downY}`,
-      `Q ${rightX} ${downY} ${rightX} ${downY + r}`,
-      `L ${rightX} ${upY - r}`,
-      `Q ${rightX} ${upY} ${rightX - r * dirR} ${upY}`,
-      `L ${toX + r * dirR} ${upY}`,
-      `Q ${toX} ${upY} ${toX} ${upY + r}`,
-      `L ${toX} ${toY}`,
-    ].join(' ');
+    // Build path with rounded corners
+    // Points: start, corner1(down-right), corner2(right-up), corner3(up-left), corner4(left-down), end
+    const pts = [
+      { x: fromX, y: fromY },
+      { x: fromX, y: downY },      // go down
+      { x: rightX, y: downY },      // go right
+      { x: rightX, y: upY },        // go up
+      { x: toX, y: upY },           // go left
+      { x: toX, y: toY },           // go down into target
+    ];
+
+    let path = `M ${pts[0].x} ${pts[0].y}`;
+    for (let i = 1; i < pts.length - 1; i++) {
+      path += ' ' + roundedCorner(pts[i-1].x, pts[i-1].y, pts[i].x, pts[i].y, pts[i+1].x, pts[i+1].y, r);
+    }
+    path += ` L ${pts[pts.length - 1].x} ${pts[pts.length - 1].y}`;
+    return path;
   }
 
-  // Forward: down → H → down
+  // Forward: down → H(lane) → down
   const minBend = fromY + LANE_MARGIN;
   const maxBend = toY - LANE_MARGIN;
 
@@ -117,14 +147,19 @@ function buildPath(
   const r = Math.min(CORNER_RADIUS, (bendY - fromY) / 2, (toY - bendY) / 2);
   const direction = toX > fromX ? 1 : -1;
 
-  return [
-    `M ${fromX} ${fromY}`,
-    `L ${fromX} ${bendY - r}`,
-    `Q ${fromX} ${bendY} ${fromX + direction * r} ${bendY}`,
-    `L ${toX - direction * r} ${bendY}`,
-    `Q ${toX} ${bendY} ${toX} ${bendY + r}`,
-    `L ${toX} ${toY}`,
-  ].join(' ');
+  const pts = [
+    { x: fromX, y: fromY },
+    { x: fromX, y: bendY },
+    { x: toX, y: bendY },
+    { x: toX, y: toY },
+  ];
+
+  let path = `M ${pts[0].x} ${pts[0].y}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    path += ' ' + roundedCorner(pts[i-1].x, pts[i-1].y, pts[i].x, pts[i].y, pts[i+1].x, pts[i+1].y, r);
+  }
+  path += ` L ${pts[pts.length - 1].x} ${pts[pts.length - 1].y}`;
+  return path;
 }
 
 export const Connection: React.FC<ConnectionProps> = ({
@@ -159,9 +194,6 @@ export const Connection: React.FC<ConnectionProps> = ({
     [onClick, connection.id],
   );
 
-  const handleMouseEnter = useCallback(() => setIsHovered(true), []);
-  const handleMouseLeave = useCallback(() => setIsHovered(false), []);
-
   useEffect(() => {
     if (!isSelected) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -179,7 +211,6 @@ export const Connection: React.FC<ConnectionProps> = ({
   const crossRefClass = connection.kind === 'cross-ref' ? styles['connection--cross-ref'] : '';
   const endpointClass = `${styles.endpoint} ${isHovered || isSelected ? styles['endpoint--hover'] : ''}`;
 
-  // Extract start/end from path for endpoint circles
   const startMatch = pathData.match(/M\s+([\d.]+)\s+([\d.]+)/);
   const endMatch = pathData.match(/L\s+([\d.]+)\s+([\d.]+)\s*$/);
   const startPoint = startMatch
@@ -196,8 +227,8 @@ export const Connection: React.FC<ConnectionProps> = ({
         d={pathData}
         className={`${styles.connection} ${crossRefClass} ${isSelected ? styles['connection--selected'] : ''}`}
         onClick={handleClick}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
         tabIndex={0}
         role="button"
         aria-label={`Connection from ${fromNode.text} to ${toNode.text}`}

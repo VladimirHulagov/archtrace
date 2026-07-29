@@ -411,11 +411,28 @@ export const Tree: React.FC<TreeProps> = ({
           wrapperClass={styles.transformWrapper}
           contentClass={styles.transformContent}
         >
+          <div
+            style={{ position: 'absolute', inset: 0, cursor: 'grab' }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setSelectedNodeId(null);
+                setSelectedConnectionId(null);
+                if (onDeselect) onDeselect();
+              }
+            }}
+          />
           <svg
             className={styles.connectionLayer}
             width={bounds.width}
             height={bounds.height}
             style={{ position: 'absolute', top: 0, left: 0 }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setSelectedNodeId(null);
+                setSelectedConnectionId(null);
+                if (onDeselect) onDeselect();
+              }
+            }}
           >
             {(() => { resetLanes(`${nodes.length}-${connections.length}`); return null; })()}
             {connections.map((conn) => {
