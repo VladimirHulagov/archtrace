@@ -227,6 +227,29 @@ export const Tree: React.FC<TreeProps> = ({
     announce('Edit cancelled');
   }, [announce]);
 
+  // Click-to-close: listen for clicks on the transform wrapper background
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      // If click is on the transform wrapper/content area (not a node or connection)
+      const isNode = target.closest('[role="treeitem"]');
+      const isConnection = target.closest('svg path');
+      const isButton = target.closest('button');
+      const isCanvas = target.closest('[class*="transformContent"]') ||
+                       target.closest('[class*="transformWrapper"]') ||
+                       target.tagName === 'svg';
+
+      if (!isNode && !isConnection && !isButton && isCanvas) {
+        setSelectedNodeId(null);
+        setSelectedConnectionId(null);
+        if (onDeselect) onDeselect();
+      }
+    };
+
+    document.addEventListener('click', handleClick, true);
+    return () => document.removeEventListener('click', handleClick, true);
+  }, [onDeselect]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (editingNode) return;

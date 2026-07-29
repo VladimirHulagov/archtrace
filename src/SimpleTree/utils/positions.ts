@@ -187,8 +187,8 @@ export function calculateLayout(
 
   g.setGraph({
     rankdir: 'TB',
-    nodesep: 60,
-    ranksep: 100,
+    nodesep: 50,
+    ranksep: 120,
     marginx: PADDING,
     marginy: PADDING,
     edgesep: 30,

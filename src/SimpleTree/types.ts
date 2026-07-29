@@ -14,6 +14,8 @@ export interface TreeNode {
   description?: string;
   nodeType?: 'requirement' | 'decision' | 'task';  // ADR type
   voteTally?: string;  // e.g. "A:4 B:2"
+  voteSectors?: { option: string; weight: number; color: string }[];
+  winnerVote?: string;  // which option won (for connection exit point)
   connectionKind?: 'parent' | 'cross-ref';  // for connection styling
 }
 

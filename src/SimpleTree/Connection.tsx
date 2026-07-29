@@ -71,9 +71,27 @@ function buildPath(
 
   const fromY = fromNode.y + fromSize.height;
   const toY = toNode.y;
-  const fromX = portOffset
-    ? fromNode.x + (fromSize.width * (portOffset.exitIndex + 1)) / (portOffset.exitCount + 1)
-    : fromNode.x + fromSize.width / 2;
+  // Exit from the winning vote sector's center position
+  let fromX: number;
+  if (fromNode.voteSectors && fromNode.voteSectors.length > 0) {
+    const totalWeight = fromNode.voteSectors.reduce((s, sec) => s + sec.weight, 0);
+    const winner = fromNode.voteSectors.find(s => s.option === fromNode.winnerVote);
+    if (winner && totalWeight > 0) {
+      // Find sector start position (sectors sorted alphabetically)
+      let accumW = 0;
+      for (const sec of fromNode.voteSectors) {
+        if (sec.option === winner.option) break;
+        accumW += sec.weight;
+      }
+      fromX = fromNode.x + ((accumW + winner.weight / 2) / totalWeight) * fromSize.width;
+    } else {
+      fromX = fromNode.x + fromSize.width / 2;
+    }
+  } else if (portOffset) {
+    fromX = fromNode.x + (fromSize.width * (portOffset.exitIndex + 1)) / (portOffset.exitCount + 1);
+  } else {
+    fromX = fromNode.x + fromSize.width / 2;
+  }
   const toX = portOffset
     ? toNode.x + (toSize.width * (portOffset.entryIndex + 1)) / (portOffset.entryCount + 1)
     : toNode.x + toSize.width / 2;

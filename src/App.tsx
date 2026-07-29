@@ -21,9 +21,19 @@ const TYPE_ICONS: Record<string, string> = {
   task: '🔨',
 };
 
+const VOTE_COLORS: Record<string, string> = {
+  A: '#52c41a',
+  B: '#fa8c16',
+  C: '#1890ff',
+  D: '#722ed1',
+};
+
 function decisionToTreeNode(d: DecisionNode): TreeNode {
   // Build vote summary
   let voteTally = '';
+  let voteSectors: { option: string; weight: number; color: string }[] = [];
+  let winnerVote: string | undefined;
+
   if (d.voters?.length > 0) {
     const tally: Record<string, number> = {};
     for (const v of d.voters) {
@@ -33,6 +43,19 @@ function decisionToTreeNode(d: DecisionNode): TreeNode {
       .sort((a, b) => b[1] - a[1])
       .map(([opt, weight]) => `${opt}:${weight}`)
       .join(' ');
+
+    // Build sectors sorted by option letter
+    voteSectors = Object.entries(tally)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([opt, weight]) => ({
+        option: opt,
+        weight,
+        color: VOTE_COLORS[opt] || '#8c8c8c',
+      }));
+
+    // Winner = highest weight
+    const sorted = Object.entries(tally).sort((a, b) => b[1] - a[1]);
+    if (sorted.length > 0) winnerVote = sorted[0][0];
   }
 
   return {
@@ -46,6 +69,8 @@ function decisionToTreeNode(d: DecisionNode): TreeNode {
     description: voteTally || d.type,
     nodeType: d.type,
     voteTally,
+    voteSectors,
+    winnerVote,
   };
 }
 

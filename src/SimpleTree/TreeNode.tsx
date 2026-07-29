@@ -259,10 +259,34 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
               <p className={styles.node__description}>{node.description}</p>
             </div>
           )}
-          {voteBadge && (
-            <span className={voteBadge.cls} title="Vote tally">
+                  {voteBadge && (
+            <span className={voteBadge.cls} title="Vote tally" style={{ fontSize: '11px', padding: '1px 4px' }}>
               {voteBadge.text}
             </span>
+          )}
+          {node.voteSectors && node.voteSectors.length > 0 && (
+            <div style={{
+              display: 'flex',
+              height: '6px',
+              borderRadius: '0 0 6px 6px',
+              overflow: 'hidden',
+              marginTop: 'auto',
+              marginLeft: '-12px',
+              marginRight: '-12px',
+              marginBottom: '-8px',
+            }}>
+              {node.voteSectors.map(sec => (
+                <div
+                  key={sec.option}
+                  style={{
+                    flex: sec.weight,
+                    backgroundColor: sec.color,
+                    opacity: node.winnerVote && node.winnerVote !== sec.option ? 0.35 : 1,
+                  }}
+                  title={`${sec.option}: ${sec.weight}`}
+                />
+              ))}
+            </div>
           )}
         </>
       )}
