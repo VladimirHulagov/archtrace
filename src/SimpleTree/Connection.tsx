@@ -73,7 +73,7 @@ function buildPath(
 
   // Account for vote sector bar (14px) at bottom of rich nodes
   const hasSectors = fromNode.voteSectors && fromNode.voteSectors.length > 0;
-  const sectorHeight = hasSectors ? 4 : 0; // 12px bar, 8px overlaps with padding
+  const sectorHeight = hasSectors ? 14 : 0; // sector center: 6px margin + 8px (half of 16px bar)
   const fromY = fromNode.y + fromSize.height + sectorHeight;
   const toY = toNode.y;
   // Exit from the winning vote sector's center position

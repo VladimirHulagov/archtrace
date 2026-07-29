@@ -97,7 +97,7 @@ export const Controls: React.FC<ControlsProps> = ({
             title="Zoom in"
             aria-label="Zoom in"
           >
-            <span className={styles['controls__btn--icon']}>🔍+</span>
+            <span className={styles['controls__btn--icon']}>+</span>
           </button>
 
           <button
@@ -107,7 +107,7 @@ export const Controls: React.FC<ControlsProps> = ({
             title="Zoom out"
             aria-label="Zoom out"
           >
-            <span className={styles['controls__btn--icon']}>🔍−</span>
+            <span className={styles['controls__btn--icon']}>−</span>
           </button>
 
           <button
@@ -117,7 +117,7 @@ export const Controls: React.FC<ControlsProps> = ({
             title="Reset zoom"
             aria-label="Reset zoom"
           >
-            <span className={styles['controls__btn--icon']}>⤢</span>
+            <span className={styles['controls__btn--icon']}>⤄</span>
           </button>
         </>
       )}

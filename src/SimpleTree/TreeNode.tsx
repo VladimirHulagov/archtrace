@@ -212,13 +212,12 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
           {node.voteSectors && node.voteSectors.length > 0 && (
             <div style={{
               display: 'flex',
-              height: '12px',
+              height: '16px',
               borderRadius: '0 0 6px 6px',
               overflow: 'visible',
-              marginTop: 'auto',
+              marginTop: '6px',
               marginLeft: '-12px',
               marginRight: '-12px',
-              marginBottom: '-8px',
             }}>
               {node.voteSectors.map(sec => {
                 const isWinner = node.winnerVote === sec.option;
@@ -247,11 +246,11 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
                     {isWinner && (
                       <span style={{
                         position: 'absolute',
-                        bottom: '-3px',
+                        bottom: '-4px',
                         left: '50%',
                         transform: 'translateX(-50%)',
-                        width: '7px',
-                        height: '7px',
+                        width: '8px',
+                        height: '8px',
                         borderRadius: '50%',
                         backgroundColor: '#fff',
                         border: `2px solid ${sec.color}`,
