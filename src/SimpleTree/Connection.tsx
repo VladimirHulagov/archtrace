@@ -1,5 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useRef } from 'react';
 import { TreeNode, Connection as ConnectionType, Point } from './types';
+import { getNodeSize } from './utils/positions';
 import styles from './styles.module.css';
 
 const ENDPOINT_RADIUS = 5;
@@ -24,9 +25,8 @@ function orthogonalize(p1: Point, p2: Point): Point[] {
   const dy = Math.abs(p2.y - p1.y);
   // Already orthogonal (or nearly)
   if (dx < 1 || dy < 1) return [];
-  // Insert a midY point: go vertical first, then horizontal
-  const midY = (p1.y + p2.y) / 2;
-  return [{ x: p1.x, y: midY }, { x: p2.x, y: midY }];
+  // Go vertical to p2.y first, then horizontal — preserves dagre Y separation
+  return [{ x: p1.x, y: p2.y }];
 }
 
 /**
@@ -34,14 +34,21 @@ function orthogonalize(p1: Point, p2: Point): Point[] {
  * Step 1: Expand any diagonal segments into orthogonal L-bends.
  * Step 2: Round corners with Q curves.
  */
-function buildPath(rawPoints: Point[]): string {
+function buildPath(rawPoints: Point[], fromNode: TreeNode, toNode: TreeNode): string {
   if (rawPoints.length === 0) return '';
 
+  // Snap endpoints: start = source bottom-center, end = target top-center
+  const fromSize = getNodeSize(fromNode);
+  const toSize = getNodeSize(toNode);
+  const snapped: Point[] = [...rawPoints];
+  snapped[0] = { x: fromNode.x + fromSize.width / 2, y: fromNode.y + fromSize.height };
+  snapped[snapped.length - 1] = { x: toNode.x + toSize.width / 2, y: toNode.y };
+
   // Step 1: Orthogonalize — expand diagonals into H+V segments
-  const points: Point[] = [rawPoints[0]];
-  for (let i = 1; i < rawPoints.length; i++) {
-    const intermediates = orthogonalize(rawPoints[i - 1], rawPoints[i]);
-    points.push(...intermediates, rawPoints[i]);
+  const points: Point[] = [snapped[0]];
+  for (let i = 1; i < snapped.length; i++) {
+    const intermediates = orthogonalize(snapped[i - 1], snapped[i]);
+    points.push(...intermediates, snapped[i]);
   }
 
   if (points.length <= 2) {
@@ -100,7 +107,7 @@ export const Connection: React.FC<ConnectionProps> = ({
   const pathRef = useRef<SVGPathElement>(null);
   const [isHovered, setIsHovered] = React.useState(false);
 
-  const pathData = useMemo(() => buildPath(points), [points]);
+  const pathData = useMemo(() => buildPath(points, fromNode, toNode), [points, fromNode, toNode]);
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
