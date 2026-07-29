@@ -8,6 +8,7 @@ export interface DecisionNode {
   created: string;
   decided: string | null;
   voters: Voter[];
+  options: { letter: string; title: string }[];
   body: string;
   file: string;
 }

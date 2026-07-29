@@ -27,6 +27,7 @@ export interface DecisionNode {
   created: string;
   decided: string | null;
   voters: Voter[];
+  options: { letter: string; title: string }[];
   body: string;        // markdown body (without frontmatter)
   file: string;        // source filename
 }
@@ -227,6 +228,31 @@ function parseYAMLArray(lines: string[], startIdx: number): { value: any[]; next
 
 const DECISIONS_DIR = path.resolve(process.cwd(), 'decisions');
 
+
+/**
+ * Parse option names from markdown body.
+ * Matches: ### Option A: Title  OR  ### A: Title  OR  ## A: Title
+ */
+function parseOptions(body: string): { letter: string; title: string }[] {
+  const options: { letter: string; title: string }[] = [];
+  const lines = body.split('\n');
+  for (const line of lines) {
+    // Match: ### Option A: ... or ### A: ... (but not ### Context, ### Decision, etc.)
+    const m = line.match(/^#{2,3}\s+(?:Option\s+)?([A-Z])\s*[:.·]\s*(.+)/i);
+    if (m) {
+      const letter = m[1].toUpperCase();
+      const title = m[2].trim();
+      // Filter out false positives (Context, Requirement, etc.)
+      if (title.length > 2 && !['Context', 'Decision', 'Requirement', 'Consequences', 'Options'].includes(title)) {
+        if (!options.find(o => o.letter === letter)) {
+          options.push({ letter, title });
+        }
+      }
+    }
+  }
+  return options;
+}
+
 export function parseDecisionFile(filePath: string): DecisionNode | null {
   const raw = fs.readFileSync(filePath, 'utf-8');
   const { frontmatter, body } = parseFrontmatter(raw);
@@ -241,6 +267,7 @@ export function parseDecisionFile(filePath: string): DecisionNode | null {
     created: frontmatter.created || new Date().toISOString().split('T')[0],
     decided: frontmatter.decided ?? null,
     voters: frontmatter.voters || [],
+    options: parseOptions(body),
     body: body.trim(),
     file: path.basename(filePath),
   };

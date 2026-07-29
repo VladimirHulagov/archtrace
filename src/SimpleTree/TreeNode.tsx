@@ -15,6 +15,13 @@ export interface TreeNodeProps {
   onConnectionEnd: (nodeId: string) => void;
 }
 
+const VOTE_COLORS: Record<string, string> = {
+  A: '#52c41a',
+  B: '#fa8c16',
+  C: '#1890ff',
+  D: '#722ed1',
+};
+
 const STATUS_MAP: Record<string, string> = {
   success: styles['node__status--success'],
   warning: styles['node__status--warning'],

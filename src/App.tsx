@@ -66,11 +66,12 @@ function decisionToTreeNode(d: DecisionNode): TreeNode {
     type: 'rich',
     status: d.status,
     icon: STATUS_ICONS[d.status] || TYPE_ICONS[d.type] || '📄',
-    description: voteTally || d.type,
+    description: d.type,
     nodeType: d.type,
     voteTally,
     voteSectors,
     winnerVote,
+    options: d.options || [],
   };
 }
 
