@@ -76,6 +76,78 @@ export interface PortOffset {
  * Multiple connections entering the same node get distributed
  * across the top edge. Multiple leaving get distributed across bottom.
  */
+
+/**
+ * Pre-compute unique bendY for each forward connection.
+ * Groups by source node's bottom Y — all outgoing from same source
+ * get sequential lanes with LANE_MIN_STEP spacing.
+ * Returns Map<connId, bendY>.
+ */
+export function computeBendYs(
+  connections: Connection[],
+  nodes: TreeNode[],
+  portOffsets: Map<string, PortOffset>,
+): Map<string, number> {
+  const nodeMap = new Map(nodes.map(n => [n.id, n]));
+  const result = new Map<string, number>();
+
+  // Group forward connections by source bottom Y
+  const groups = new Map<string, string[]>(); // bandKey → [connId]
+
+  connections.forEach(conn => {
+    const fromNode = nodeMap.get(conn.from);
+    const toNode = nodeMap.get(conn.to);
+    if (!fromNode || !toNode) return;
+
+    const fromSize = getNodeSize(fromNode);
+    const fromBottom = Math.round(fromNode.y + fromSize.height);
+    const toTop = Math.round(toNode.y);
+    const isForward = toTop > fromBottom;
+    if (!isForward) return; // skip backward — they use side routing
+
+    const bandKey = `src-${fromBottom}`;
+    if (!groups.has(bandKey)) groups.set(bandKey, []);
+    groups.get(bandKey)!.push(conn.id);
+  });
+
+  const LANE_MIN_STEP = 14;
+  const LANE_MARGIN = 20;
+
+  // Assign bendY within each group
+  groups.forEach((connIds, bandKey) => {
+    connIds.forEach((connId, idx) => {
+      const conn = connections.find(c => c.id === connId);
+      if (!conn) return;
+      const fromNode = nodeMap.get(conn.from)!;
+      const toNode = nodeMap.get(conn.to)!;
+      const fromSize = getNodeSize(fromNode);
+
+      const fromY = fromNode.y + fromSize.height;
+      const toY = toNode.y;
+      const minBend = fromY + LANE_MARGIN;
+      const maxBend = toY - LANE_MARGIN;
+
+      if (maxBend <= minBend) {
+        result.set(connId, (fromY + toY) / 2);
+        return;
+      }
+
+      // Sequential lane assignment
+      const idealBend = (fromY + toY) / 2;
+      // Try ideal first, then step up by LANE_MIN_STEP
+      let bendY = idealBend + idx * LANE_MIN_STEP;
+      // Clamp to [minBend, maxBend]
+      if (bendY > maxBend) {
+        bendY = idealBend - (bendY - maxBend);
+      }
+      bendY = Math.max(minBend, Math.min(bendY, maxBend));
+      result.set(connId, bendY);
+    });
+  });
+
+  return result;
+}
+
 export function computePortOffsets(connections: Connection[]): Map<string, PortOffset> {
   // Count incoming/outgoing per node
   const incomingByNode = new Map<string, string[]>(); // nodeId → [connId]

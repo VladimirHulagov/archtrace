@@ -10,33 +10,9 @@ const LANE_MIN_STEP = 14;
 const LANE_MARGIN = 20;
 const BACKWARD_MARGIN = 60;
 
-// Module-level lane tracker: ensures unique bendY per band
-const laneTracker = new Map<string, number[]>();
-
-function getUniqueBendY(bandKey: string, idealY: number, min: number, max: number): number {
-  let lanes = laneTracker.get(bandKey);
-  if (!lanes) { lanes = []; laneTracker.set(bandKey, lanes); }
-
-  let bendY = Math.max(min, Math.min(idealY, max));
-  let attempts = 0;
-  while (attempts < 200) {
-    const tooClose = lanes.some(y => Math.abs(y - bendY) < LANE_MIN_STEP);
-    if (!tooClose) break;
-    bendY += LANE_MIN_STEP;
-    if (bendY > max) bendY = min + LANE_MIN_STEP;
-    attempts++;
-  }
-  lanes.push(bendY);
-  return bendY;
-}
-
-let laneResetKey = '';
-export function resetLanes(key: string) {
-  if (key !== laneResetKey) {
-    laneTracker.clear();
-    laneResetKey = key;
-  }
-}
+// Lane tracking moved to Tree.tsx (computeBendYs in positions.ts)
+// Module-level tracking doesn't work with React concurrent rendering.
+export function resetLanes(_key: string) {}
 
 interface ConnectionProps {
   connection: ConnectionType;
@@ -47,6 +23,7 @@ interface ConnectionProps {
   onClick: (connectionId: string) => void;
   onDelete: (connectionId: string) => void;
   portOffset?: PortOffset;
+  bendY?: number;
 }
 
 /**
@@ -85,8 +62,9 @@ function buildPath(
   _rawPoints: Point[],
   fromNode: TreeNode,
   toNode: TreeNode,
-  laneKey: string,
+  _laneKey: string,
   portOffset?: PortOffset,
+  bendY?: number,
 ): string {
   const fromSize = getNodeSize(fromNode);
   const toSize = getNodeSize(toNode);
@@ -141,16 +119,18 @@ function buildPath(
     return `M ${fromX} ${fromY} L ${toX} ${toY}`;
   }
 
-  const idealBend = (fromY + toY) / 2;
-  const bendY = getUniqueBendY(laneKey, idealBend, minBend, maxBend);
+  // Use pre-computed bendY from Tree (guarantees unique lane per source)
+  const actualBendY = bendY != null
+    ? Math.max(minBend, Math.min(bendY, maxBend))
+    : (fromY + toY) / 2;
 
-  const r = Math.min(CORNER_RADIUS, (bendY - fromY) / 2, (toY - bendY) / 2);
+  const r = Math.min(CORNER_RADIUS, (actualBendY - fromY) / 2, (toY - actualBendY) / 2);
   const direction = toX > fromX ? 1 : -1;
 
   const pts = [
     { x: fromX, y: fromY },
-    { x: fromX, y: bendY },
-    { x: toX, y: bendY },
+    { x: fromX, y: actualBendY },
+    { x: toX, y: actualBendY },
     { x: toX, y: toY },
   ];
 
@@ -171,19 +151,22 @@ export const Connection: React.FC<ConnectionProps> = ({
   onClick,
   onDelete,
   portOffset,
+  bendY,
 }) => {
   const pathRef = useRef<SVGPathElement>(null);
   const [isHovered, setIsHovered] = React.useState(false);
 
   const laneKey = useMemo(() => {
-    const fy = Math.round(fromNode.y);
-    const ty = Math.round(toNode.y);
-    return `${Math.min(fy, ty)}-${Math.max(fy, ty)}`;
-  }, [fromNode.y, toNode.y]);
+    // Group by source bottom Y — all connections leaving the same source level
+    // share one lane pool so their horizontal segments don't overlap
+    const fromSize = getNodeSize(fromNode);
+    const sourceBottom = Math.round(fromNode.y + fromSize.height);
+    return `src-${sourceBottom}`;
+  }, [fromNode.y]);
 
   const pathData = useMemo(
-    () => buildPath(points, fromNode, toNode, laneKey, portOffset),
-    [points, fromNode, toNode, laneKey, portOffset],
+    () => buildPath(points, fromNode, toNode, laneKey, portOffset, bendY),
+    [points, fromNode, toNode, laneKey, portOffset, bendY],
   );
 
   const handleClick = useCallback(
