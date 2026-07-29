@@ -4,7 +4,7 @@ import dagre from '@dagrejs/dagre';
 const NODE_WIDTH = 120;
 const NODE_HEIGHT = 50;
 const RICH_NODE_WIDTH = 200;
-const RICH_NODE_HEIGHT = 110;
+const RICH_NODE_HEIGHT = 120;
 const VERTICAL_GAP = 70;
 const HORIZONTAL_GAP = 40;
 const PADDING = 20;

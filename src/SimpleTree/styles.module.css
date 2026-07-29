@@ -74,9 +74,11 @@
 
 .node--rich {
   width: 200px;
-  min-height: 80px;
+  height: 120px;
   padding: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .node__header {

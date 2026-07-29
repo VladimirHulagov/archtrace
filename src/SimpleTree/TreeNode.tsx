@@ -215,7 +215,7 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
               height: '16px',
               borderRadius: '0 0 6px 6px',
               overflow: 'visible',
-              marginTop: '6px',
+              marginTop: 'auto',
               marginLeft: '-12px',
               marginRight: '-12px',
             }}>
