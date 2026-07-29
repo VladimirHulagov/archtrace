@@ -16,15 +16,39 @@ interface ConnectionProps {
 }
 
 /**
- * Build a smooth orthogonal SVG path from dagre waypoints.
- * Each pair of consecutive segments gets a rounded corner (Q curve).
+ * Force a diagonal segment between two points into an orthogonal L-bend.
+ * Returns intermediate points to insert between p1 and p2.
  */
-function buildPath(points: Point[]): string {
-  if (points.length === 0) return '';
+function orthogonalize(p1: Point, p2: Point): Point[] {
+  const dx = Math.abs(p2.x - p1.x);
+  const dy = Math.abs(p2.y - p1.y);
+  // Already orthogonal (or nearly)
+  if (dx < 1 || dy < 1) return [];
+  // Insert a midY point: go vertical first, then horizontal
+  const midY = (p1.y + p2.y) / 2;
+  return [{ x: p1.x, y: midY }, { x: p2.x, y: midY }];
+}
+
+/**
+ * Build a smooth orthogonal SVG path from dagre waypoints.
+ * Step 1: Expand any diagonal segments into orthogonal L-bends.
+ * Step 2: Round corners with Q curves.
+ */
+function buildPath(rawPoints: Point[]): string {
+  if (rawPoints.length === 0) return '';
+
+  // Step 1: Orthogonalize — expand diagonals into H+V segments
+  const points: Point[] = [rawPoints[0]];
+  for (let i = 1; i < rawPoints.length; i++) {
+    const intermediates = orthogonalize(rawPoints[i - 1], rawPoints[i]);
+    points.push(...intermediates, rawPoints[i]);
+  }
+
   if (points.length <= 2) {
     return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
   }
 
+  // Step 2: Round corners
   const path: string[] = [`M ${points[0].x} ${points[0].y}`];
 
   for (let i = 1; i < points.length - 1; i++) {
@@ -40,7 +64,6 @@ function buildPath(points: Point[]): string {
     const len1 = Math.hypot(dx1, dy1);
     const len2 = Math.hypot(dx2, dy2);
 
-    // Only round if direction actually changes
     const sameDir = (dx1 === 0) === (dx2 === 0) && (dy1 === 0) === (dy2 === 0)
       && Math.sign(dx1) === Math.sign(dx2) && Math.sign(dy1) === Math.sign(dy2);
 
@@ -50,8 +73,6 @@ function buildPath(points: Point[]): string {
     }
 
     const r = Math.min(CORNER_RADIUS, len1 / 2, len2 / 2);
-
-    // Points along the incoming/outgoing segments at distance r from corner
     const p1x = curr.x - (dx1 / len1) * r;
     const p1y = curr.y - (dy1 / len1) * r;
     const p2x = curr.x + (dx2 / len2) * r;
