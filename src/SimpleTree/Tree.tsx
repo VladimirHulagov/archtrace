@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
-import { TreeNode, Connection, SimpleTreeProps } from './types';
+import { TreeNode, SimpleTreeProps } from './types';
 import { TreeNodeComponent } from './TreeNode';
 import { Connection as ConnectionComponent } from './Connection';
 import { Controls } from './Controls';
@@ -10,39 +10,10 @@ import styles from './styles.module.css';
 
 export interface TreeProps extends SimpleTreeProps {
   className?: string;
+  edgePoints?: Map<string, import('./types').Point[]>;
 }
 
-interface ConnectionWithOffset extends Connection {
-  offsetIndex: number;
-}
-
-function getConnectionOffsets(connections: Connection[], nodes: TreeNode[]): Map<string, number> {
-  // Group connections by source's vertical position (rounded to nearest level).
-  // Within each band, assign sequential lane indices so horizontal segments
-  // are at different Y positions with uniform spacing.
-  const nodeMap = new Map(nodes.map(n => [n.id, n]));
-  
-  // Round Y to band key (every 10px)
-  const bandIndices = new Map<string, number>();
-  const offsets = new Map<string, number>();
-
-  // Separate forward and backward connections into different lane pools
-  connections.forEach((conn) => {
-    const fromNode = nodeMap.get(conn.from);
-    const toNode = nodeMap.get(conn.to);
-    if (!fromNode || !toNode) return;
-    
-    const fromBottom = fromNode.y + (fromNode.type === 'rich' ? 80 : 50);
-    const isForward = toNode.y >= fromBottom;
-    const bandKey = `${Math.round(fromBottom / 10)}_${isForward ? 'f' : 'b'}`;
-    
-    const idx = bandIndices.get(bandKey) || 0;
-    bandIndices.set(bandKey, idx + 1);
-    offsets.set(conn.id, idx);
-  });
-
-  return offsets;
-}
+// Edge points are computed by dagre and passed via edgePoints prop
 
 export const Tree: React.FC<TreeProps> = ({
   nodes,
@@ -55,6 +26,7 @@ export const Tree: React.FC<TreeProps> = ({
   onUpdateNode,
   onAddConnection,
   onDeleteConnection,
+  edgePoints,
   className,
 }) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -73,14 +45,8 @@ export const Tree: React.FC<TreeProps> = ({
   );
   const levels = useMemo(() => groupByLevel(nodes, parentConnections), [nodes, parentConnections]);
   
-  const connectionOffsets = useMemo(() => getConnectionOffsets(connections, nodes), [connections, nodes]);
-  
-  const connectionsWithOffsets = useMemo((): ConnectionWithOffset[] => {
-    return connections.map((conn) => ({
-      ...conn,
-      offsetIndex: connectionOffsets.get(conn.id) || 0,
-    }));
-  }, [connections, connectionOffsets]);
+  // Node lookup map for Connection component
+  const nodeMap = useMemo(() => new Map(nodes.map(n => [n.id, n])), [nodes]);
 
   const bounds = useMemo(() => {
     if (nodes.length === 0) return { width: 0, height: 0 };
@@ -442,17 +408,25 @@ export const Tree: React.FC<TreeProps> = ({
             height={bounds.height}
             style={{ position: 'absolute', top: 0, left: 0 }}
           >
-            {connectionsWithOffsets.map((conn) => (
-              <ConnectionComponent
-                key={conn.id}
-                connection={conn}
-                nodes={nodes}
-                isSelected={selectedConnectionId === conn.id}
-                offsetIndex={conn.offsetIndex}
-                onClick={handleConnectionClick}
-                onDelete={handleDeleteConnection}
-              />
-            ))}
+            {connections.map((conn) => {
+              const fromNode = nodeMap.get(conn.from);
+              const toNode = nodeMap.get(conn.to);
+              if (!fromNode || !toNode) return null;
+              const pts = edgePoints?.get(conn.id) || [];
+              if (pts.length < 2) return null;
+              return (
+                <ConnectionComponent
+                  key={conn.id}
+                  connection={conn}
+                  fromNode={fromNode}
+                  toNode={toNode}
+                  points={pts}
+                  isSelected={selectedConnectionId === conn.id}
+                  onClick={handleConnectionClick}
+                  onDelete={handleDeleteConnection}
+                />
+              );
+            })}
           </svg>
           
           {nodes.map((node) => (

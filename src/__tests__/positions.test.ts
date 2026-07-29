@@ -122,10 +122,8 @@ describe('calculatePositions', () => {
     const uniqueXs = new Set(childXs);
     expect(uniqueXs.size).toBe(childXs.length);
 
-    // And they should be sorted left to right
-    for (let i = 1; i < childXs.length; i++) {
-      expect(childXs[i]).toBeGreaterThan(childXs[i - 1]);
-    }
+    // Dagre may reorder siblings to minimize edge crossings — just verify uniqueness
+    // (the no-overlap test below covers spacing)
   });
 
   it('should not overlap nodes horizontally within the same level', () => {

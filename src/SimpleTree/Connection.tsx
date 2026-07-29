@@ -1,113 +1,85 @@
 import React, { useMemo, useCallback, useEffect, useRef } from 'react';
-import { TreeNode, Connection as ConnectionType } from './types';
-import { getNodeSize } from './utils/positions';
+import { TreeNode, Connection as ConnectionType, Point } from './types';
 import styles from './styles.module.css';
 
-const CORNER_RADIUS = 4;
 const ENDPOINT_RADIUS = 5;
-const LANE_STEP = 12;
-const BEND_MARGIN = 15;
-const BACKWARD_SIDE_OFFSET = 50;
+const CORNER_RADIUS = 10;
 
 interface ConnectionProps {
   connection: ConnectionType;
-  nodes: TreeNode[];
+  fromNode: TreeNode;
+  toNode: TreeNode;
+  points: Point[];
   isSelected: boolean;
-  offsetIndex: number;
   onClick: (connectionId: string) => void;
   onDelete: (connectionId: string) => void;
 }
 
-function calculatePath(
-  fromNode: TreeNode,
-  toNode: TreeNode,
-  offsetIndex: number
-): { path: string; fromX: number; fromY: number; toX: number; toY: number } {
-  const fromSize = getNodeSize(fromNode);
-  const toSize = getNodeSize(toNode);
-
-  const fromX = fromNode.x + fromSize.width / 2;
-  const fromY = fromNode.y + fromSize.height;
-  const toX = toNode.x + toSize.width / 2;
-  const toY = toNode.y;
-
-  const isForward = toY >= fromY;
-
-  if (!isForward) {
-    // Backward (cross-ref): route AROUND the right side to avoid crossing nodes.
-    // Each backward connection uses its own lane on the right margin.
-    const rightX = Math.max(fromNode.x + fromSize.width, toNode.x + toSize.width) 
-                   + BACKWARD_SIDE_OFFSET + offsetIndex * LANE_STEP;
-    const fromBendY = fromY + BEND_MARGIN;
-    const toBendY = toY - BEND_MARGIN;
-
-    const path = [
-      `M ${fromX} ${fromY}`,
-      `L ${fromX} ${fromBendY}`,
-      `L ${rightX} ${fromBendY}`,
-      `L ${rightX} ${toBendY}`,
-      `L ${toX} ${toBendY}`,
-      `L ${toX} ${toY}`,
-    ].join(' ');
-    return { path, fromX, fromY, toX, toY };
+/**
+ * Build a smooth orthogonal SVG path from dagre waypoints.
+ * Each pair of consecutive segments gets a rounded corner (Q curve).
+ */
+function buildPath(points: Point[]): string {
+  if (points.length === 0) return '';
+  if (points.length <= 2) {
+    return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
   }
 
-  // Forward connection: route through the gap between levels.
-  // Global lane: offsetIndex is unique within the source's level band.
-  const gap = toY - fromY;
-  const laneStep = Math.min(LANE_STEP, (gap - 2 * BEND_MARGIN) / Math.max(offsetIndex + 1, 1));
-  const bendY = fromY + BEND_MARGIN + offsetIndex * laneStep;
-  const clampedBendY = Math.max(fromY + CORNER_RADIUS * 2, Math.min(bendY, toY - CORNER_RADIUS * 2));
+  const path: string[] = [`M ${points[0].x} ${points[0].y}`];
 
-  if (fromX === toX) {
-    return { path: `M ${fromX} ${fromY} L ${toX} ${toY}`, fromX, fromY, toX, toY };
+  for (let i = 1; i < points.length - 1; i++) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    const next = points[i + 1];
+
+    const dx1 = curr.x - prev.x;
+    const dy1 = curr.y - prev.y;
+    const dx2 = next.x - curr.x;
+    const dy2 = next.y - curr.y;
+
+    const len1 = Math.hypot(dx1, dy1);
+    const len2 = Math.hypot(dx2, dy2);
+
+    // Only round if direction actually changes
+    const sameDir = (dx1 === 0) === (dx2 === 0) && (dy1 === 0) === (dy2 === 0)
+      && Math.sign(dx1) === Math.sign(dx2) && Math.sign(dy1) === Math.sign(dy2);
+
+    if (sameDir || len1 === 0 || len2 === 0) {
+      path.push(`L ${curr.x} ${curr.y}`);
+      continue;
+    }
+
+    const r = Math.min(CORNER_RADIUS, len1 / 2, len2 / 2);
+
+    // Points along the incoming/outgoing segments at distance r from corner
+    const p1x = curr.x - (dx1 / len1) * r;
+    const p1y = curr.y - (dy1 / len1) * r;
+    const p2x = curr.x + (dx2 / len2) * r;
+    const p2y = curr.y + (dy2 / len2) * r;
+
+    path.push(`L ${p1x} ${p1y}`);
+    path.push(`Q ${curr.x} ${curr.y} ${p2x} ${p2y}`);
   }
 
-  const direction = toX > fromX ? 1 : -1;
-  const horizDist = Math.abs(toX - fromX);
-  const r = Math.min(CORNER_RADIUS, horizDist / 2, (clampedBendY - fromY) / 2, (toY - clampedBendY) / 2);
+  const last = points[points.length - 1];
+  path.push(`L ${last.x} ${last.y}`);
 
-  if (r < 2) {
-    const path = `M ${fromX} ${fromY} L ${fromX} ${clampedBendY} L ${toX} ${clampedBendY} L ${toX} ${toY}`;
-    return { path, fromX, fromY, toX, toY };
-  }
-
-  const path = [
-    `M ${fromX} ${fromY}`,
-    `L ${fromX} ${clampedBendY - r}`,
-    `Q ${fromX} ${clampedBendY} ${fromX + r * direction} ${clampedBendY}`,
-    `L ${toX - r * direction} ${clampedBendY}`,
-    `Q ${toX} ${clampedBendY} ${toX} ${clampedBendY + r}`,
-    `L ${toX} ${toY}`,
-  ].join(' ');
-
-  return { path, fromX, fromY, toX, toY };
+  return path.join(' ');
 }
 
 export const Connection: React.FC<ConnectionProps> = ({
   connection,
-  nodes,
+  fromNode,
+  toNode,
+  points,
   isSelected,
-  offsetIndex,
   onClick,
   onDelete,
 }) => {
   const pathRef = useRef<SVGPathElement>(null);
   const [isHovered, setIsHovered] = React.useState(false);
 
-  const fromNode = useMemo(
-    () => nodes.find((n) => n.id === connection.from),
-    [nodes, connection.from]
-  );
-  const toNode = useMemo(
-    () => nodes.find((n) => n.id === connection.to),
-    [nodes, connection.to]
-  );
-
-  const pathData = useMemo(() => {
-    if (!fromNode || !toNode) return null;
-    return calculatePath(fromNode, toNode, offsetIndex);
-  }, [fromNode, toNode, offsetIndex]);
+  const pathData = useMemo(() => buildPath(points), [points]);
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -117,13 +89,8 @@ export const Connection: React.FC<ConnectionProps> = ({
     [onClick, connection.id]
   );
 
-  const handleMouseEnter = useCallback(() => {
-    setIsHovered(true);
-  }, []);
-
-  const handleMouseLeave = useCallback(() => {
-    setIsHovered(false);
-  }, []);
+  const handleMouseEnter = useCallback(() => setIsHovered(true), []);
+  const handleMouseLeave = useCallback(() => setIsHovered(false), []);
 
   useEffect(() => {
     if (!isSelected) return;
@@ -139,26 +106,20 @@ export const Connection: React.FC<ConnectionProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isSelected, onDelete, connection.id]);
 
-  if (!pathData || !fromNode || !toNode) {
-    return null;
-  }
-
-  const offsetClass = offsetIndex === 0
-    ? styles['connection--offset-1']
-    : offsetIndex === 1
-    ? styles['connection--offset-2']
-    : styles['connection--offset-3'];
+  if (!pathData || points.length === 0) return null;
 
   const crossRefClass = connection.kind === 'cross-ref' ? styles['connection--cross-ref'] : '';
-
   const endpointClass = `${styles.endpoint} ${isHovered || isSelected ? styles['endpoint--hover'] : ''}`;
+
+  const startPoint = points[0];
+  const endPoint = points[points.length - 1];
 
   return (
     <g>
       <path
         ref={pathRef}
-        d={pathData.path}
-        className={`${styles.connection} ${offsetClass} ${crossRefClass} ${isSelected ? styles['connection--selected'] : ''}`}
+        d={pathData}
+        className={`${styles.connection} ${crossRefClass} ${isSelected ? styles['connection--selected'] : ''}`}
         onClick={handleClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
@@ -167,14 +128,14 @@ export const Connection: React.FC<ConnectionProps> = ({
         aria-label={`Connection from ${fromNode.text} to ${toNode.text}`}
       />
       <circle
-        cx={pathData.fromX}
-        cy={pathData.fromY}
+        cx={startPoint.x}
+        cy={startPoint.y}
         r={ENDPOINT_RADIUS}
         className={endpointClass}
       />
       <circle
-        cx={pathData.toX}
-        cy={pathData.toY}
+        cx={endPoint.x}
+        cy={endPoint.y}
         r={ENDPOINT_RADIUS}
         className={endpointClass}
       />

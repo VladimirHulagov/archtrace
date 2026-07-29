@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Tree, TreeNode } from './SimpleTree';
 import { fetchGraph, type Graph, type DecisionNode } from './api';
-import { calculatePositions } from './SimpleTree/utils/positions';
+import { calculateLayout } from './SimpleTree/utils/positions';
+import type { Point } from './SimpleTree/types';
 import ReactMarkdown from 'react-markdown';
 
 // ─── ADR → TreeNode mapping ──────────────────────────────
@@ -57,6 +58,7 @@ function App() {
   const nodeIdCounter = useRef(1000);
   const connectionIdCounter = useRef(1000);
   const swipeStartX = useRef<number | null>(null);
+  const [edgePoints, setEdgePoints] = useState<Map<string, Point[]>>(new Map());
 
   // ─── Fetch graph on mount ──────────────────────────────
 
@@ -71,9 +73,10 @@ function App() {
           kind: c.kind,
         }));
         const containerWidth = window.innerWidth;
-        const positioned = calculatePositions(treeNodes, treeConnections, containerWidth);
+        const { nodes: positioned, edgePoints: ePoints } = calculateLayout(treeNodes, treeConnections, containerWidth);
         setNodes(positioned);
         setConnections(treeConnections);
+        setEdgePoints(ePoints);
         setLoading(false);
       })
       .catch((err) => {
@@ -183,6 +186,7 @@ function App() {
           onUpdateNode={handleUpdateNode}
           onAddConnection={handleAddConnection}
           onDeleteConnection={handleDeleteConnection}
+          edgePoints={edgePoints}
           onNodeClick={(node) => {
             // Fetch full decision detail
             fetch(`/api/decisions/${node.id}`)
@@ -210,7 +214,7 @@ function App() {
           onTouchEnd={(e) => {
             if (swipeStartX.current !== null) {
               const deltaX = e.changedTouches[0].clientX - swipeStartX.current;
-              if (deltaX < -50) setSelectedDetail(null);
+              if (deltaX > 50) setSelectedDetail(null);
               swipeStartX.current = null;
             }
           }}
