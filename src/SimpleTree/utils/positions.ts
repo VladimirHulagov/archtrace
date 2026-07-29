@@ -63,6 +63,49 @@ export function groupByLevel(
  * Run dagre layout on nodes + connections.
  * Returns positioned nodes (x/y = top-left) and edge waypoints for each connection.
  */
+
+export interface PortOffset {
+  exitIndex: number;   // index among outgoing connections from source
+  exitCount: number;   // total outgoing from source
+  entryIndex: number;  // index among incoming connections to target
+  entryCount: number;  // total incoming to target
+}
+
+/**
+ * For each connection, compute its entry/exit port index.
+ * Multiple connections entering the same node get distributed
+ * across the top edge. Multiple leaving get distributed across bottom.
+ */
+export function computePortOffsets(connections: Connection[]): Map<string, PortOffset> {
+  // Count incoming/outgoing per node
+  const incomingByNode = new Map<string, string[]>(); // nodeId → [connId]
+  const outgoingByNode = new Map<string, string[]>();
+
+  connections.forEach(conn => {
+    if (!outgoingByNode.has(conn.from)) outgoingByNode.set(conn.from, []);
+    outgoingByNode.get(conn.from)!.push(conn.id);
+
+    if (!incomingByNode.has(conn.to)) incomingByNode.set(conn.to, []);
+    incomingByNode.get(conn.to)!.push(conn.id);
+  });
+
+  const result = new Map<string, PortOffset>();
+
+  connections.forEach(conn => {
+    const outgoing = outgoingByNode.get(conn.from) || [conn.id];
+    const incoming = incomingByNode.get(conn.to) || [conn.id];
+
+    result.set(conn.id, {
+      exitIndex: outgoing.indexOf(conn.id),
+      exitCount: outgoing.length,
+      entryIndex: incoming.indexOf(conn.id),
+      entryCount: incoming.length,
+    });
+  });
+
+  return result;
+}
+
 export function calculateLayout(
   nodes: TreeNode[],
   connections: Connection[],

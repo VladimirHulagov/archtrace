@@ -3,6 +3,7 @@ import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { TreeNode, SimpleTreeProps } from './types';
 import { TreeNodeComponent } from './TreeNode';
 import { Connection as ConnectionComponent, resetLanes } from './Connection';
+import { computePortOffsets, type PortOffset } from './utils/positions';
 import { Controls } from './Controls';
 import { Modal } from './Modal';
 import { groupByLevel, getNodeSize } from './utils/positions';
@@ -49,6 +50,9 @@ export const Tree: React.FC<TreeProps> = ({
   
   // Node lookup map for Connection component
   const nodeMap = useMemo(() => new Map(nodes.map(n => [n.id, n])), [nodes]);
+  
+  // Compute port offsets: distribute entry/exit points across node edges
+  const portOffsets = useMemo(() => computePortOffsets(connections), [connections]);
 
   const bounds = useMemo(() => {
     if (nodes.length === 0) return { width: 0, height: 0 };
@@ -420,6 +424,7 @@ export const Tree: React.FC<TreeProps> = ({
               if (!fromNode || !toNode) return null;
               const pts = edgePoints?.get(conn.id) || [];
               if (pts.length < 2) return null;
+              const ports = portOffsets.get(conn.id);
               return (
                 <ConnectionComponent
                   key={conn.id}
@@ -427,6 +432,7 @@ export const Tree: React.FC<TreeProps> = ({
                   fromNode={fromNode}
                   toNode={toNode}
                   points={pts}
+                  portOffset={ports}
                   isSelected={selectedConnectionId === conn.id}
                   onClick={handleConnectionClick}
                   onDelete={handleDeleteConnection}

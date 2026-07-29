@@ -1,6 +1,7 @@
 import React, { useMemo, useCallback, useEffect, useRef } from 'react';
 import { TreeNode, Connection as ConnectionType, Point } from './types';
 import { getNodeSize } from './utils/positions';
+import type { PortOffset } from './utils/positions';
 import styles from './styles.module.css';
 
 const ENDPOINT_RADIUS = 5;
@@ -46,6 +47,7 @@ interface ConnectionProps {
   isSelected: boolean;
   onClick: (connectionId: string) => void;
   onDelete: (connectionId: string) => void;
+  portOffset?: PortOffset;
 }
 
 /**
@@ -57,14 +59,19 @@ interface ConnectionProps {
  * Uses a lane system to guarantee no two horizontal segments share the same Y.
  * Guarantees vertical entry/exit at top/bottom centers.
  */
-function buildPath(rawPoints: Point[], fromNode: TreeNode, toNode: TreeNode, laneKey: string): string {
+function buildPath(rawPoints: Point[], fromNode: TreeNode, toNode: TreeNode, laneKey: string, portOffset?: PortOffset): string {
   const fromSize = getNodeSize(fromNode);
   const toSize = getNodeSize(toNode);
 
-  const fromX = fromNode.x + fromSize.width / 2;
+  // Distribute exit/entry points across bottom/top edge
   const fromY = fromNode.y + fromSize.height;
-  const toX = toNode.x + toSize.width / 2;
   const toY = toNode.y;
+  const fromX = portOffset
+    ? fromNode.x + (fromSize.width * (portOffset.exitIndex + 1)) / (portOffset.exitCount + 1)
+    : fromNode.x + fromSize.width / 2;
+  const toX = portOffset
+    ? toNode.x + (toSize.width * (portOffset.entryIndex + 1)) / (portOffset.entryCount + 1)
+    : toNode.x + toSize.width / 2;
 
   if (Math.abs(fromX - toX) < 1) {
     return `M ${fromX} ${fromY} L ${toX} ${toY}`;
@@ -109,6 +116,7 @@ export const Connection: React.FC<ConnectionProps> = ({
   isSelected,
   onClick,
   onDelete,
+  portOffset,
 }) => {
   const pathRef = useRef<SVGPathElement>(null);
   const [isHovered, setIsHovered] = React.useState(false);
@@ -119,7 +127,7 @@ export const Connection: React.FC<ConnectionProps> = ({
     return `${Math.min(fromY, toY)}-${Math.max(fromY, toY)}`;
   }, [fromNode.y, toNode.y]);
   
-  const pathData = useMemo(() => buildPath(points, fromNode, toNode, laneKey), [points, fromNode, toNode, laneKey]);
+  const pathData = useMemo(() => buildPath(points, fromNode, toNode, laneKey, portOffset), [points, fromNode, toNode, laneKey, portOffset]);
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -151,8 +159,17 @@ export const Connection: React.FC<ConnectionProps> = ({
   const crossRefClass = connection.kind === 'cross-ref' ? styles['connection--cross-ref'] : '';
   const endpointClass = `${styles.endpoint} ${isHovered || isSelected ? styles['endpoint--hover'] : ''}`;
 
-  const startPoint = points[0];
-  const endPoint = points[points.length - 1];
+  // Recompute start/end for circles (matching buildPath port offsets)
+  const fromSize2 = getNodeSize(fromNode);
+  const toSize2 = getNodeSize(toNode);
+  const startPort = pathData ? pathData.match(/M\s+([\d.]+)\s+([\d.]+)/) : null;
+  const endPort = pathData ? pathData.match(/L\s+([\d.]+)\s+([\d.]+)\s*$/) : null;
+  const startPoint = startPort
+    ? { x: parseFloat(startPort[1]), y: parseFloat(startPort[2]) }
+    : { x: fromNode.x + fromSize2.width / 2, y: fromNode.y + fromSize2.height };
+  const endPoint = endPort
+    ? { x: parseFloat(endPort[1]), y: parseFloat(endPort[2]) }
+    : { x: toNode.x + toSize2.width / 2, y: toNode.y };
 
   return (
     <g>
