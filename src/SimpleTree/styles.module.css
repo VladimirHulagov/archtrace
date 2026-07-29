@@ -99,9 +99,9 @@
 
 .node__title {
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
+  hyphens: auto;
+  line-height: 1.2;
 }
 
 .node__status {

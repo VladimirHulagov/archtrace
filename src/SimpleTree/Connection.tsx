@@ -24,6 +24,7 @@ interface ConnectionProps {
   onDelete: (connectionId: string) => void;
   portOffset?: PortOffset;
   bendY?: number;
+  allNodes?: TreeNode[];
 }
 
 /**
@@ -65,6 +66,7 @@ function buildPath(
   _laneKey: string,
   portOffset?: PortOffset,
   bendY?: number,
+  allNodes?: TreeNode[],
 ): string {
   const fromSize = getNodeSize(fromNode);
   const toSize = getNodeSize(toNode);
@@ -141,9 +143,57 @@ function buildPath(
   }
 
   // Use pre-computed bendY from Tree (guarantees unique lane per source)
-  const actualBendY = bendY != null
+  let actualBendY = bendY != null
     ? Math.max(minBend, Math.min(bendY, maxBend))
     : (fromY + toY) / 2;
+
+  // Collision avoidance: if horizontal segment at bendY crosses a node box,
+  // find a Y that doesn't hit any node
+  if (allNodes && allNodes.length > 0) {
+    const xMin = Math.min(fromX, toX);
+    const xMax = Math.max(fromX, toX);
+    
+    const hitsNode = (testY: number): boolean => {
+      for (const n of allNodes) {
+        if (n.id === fromNode.id || n.id === toNode.id) continue;
+        const ns = getNodeSize(n);
+        const nTop = n.y;
+        const nBottom = n.y + ns.height;
+        const nLeft = n.x;
+        const nRight = n.x + ns.width;
+        // Does horizontal segment at testY from xMin to xMax cross this node?
+        if (testY >= nTop && testY <= nBottom && xMax > nLeft + 2 && xMin < nRight - 2) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // Try to find a collision-free Y
+    if (hitsNode(actualBendY)) {
+      // Try stepping up/down in small increments
+      let bestY = actualBendY;
+      let found = false;
+      for (let step = LANE_MIN_STEP; step < (maxBend - minBend); step += LANE_MIN_STEP) {
+        // Try below
+        const testDown = actualBendY + step;
+        if (testDown <= maxBend && !hitsNode(testDown)) {
+          bestY = testDown;
+          found = true;
+          break;
+        }
+        // Try above
+        const testUp = actualBendY - step;
+        if (testUp >= minBend && !hitsNode(testUp)) {
+          bestY = testUp;
+          found = true;
+          break;
+        }
+      }
+      if (found) actualBendY = bestY;
+      // If not found, keep original — at least it's lane-separated
+    }
+  }
 
   const r = Math.min(CORNER_RADIUS, (actualBendY - fromY) / 2, (toY - actualBendY) / 2);
   const direction = toX > fromX ? 1 : -1;
@@ -173,6 +223,7 @@ export const Connection: React.FC<ConnectionProps> = ({
   onDelete,
   portOffset,
   bendY,
+  allNodes,
 }) => {
   const pathRef = useRef<SVGPathElement>(null);
   const [isHovered, setIsHovered] = React.useState(false);
@@ -186,8 +237,8 @@ export const Connection: React.FC<ConnectionProps> = ({
   }, [fromNode.y]);
 
   const pathData = useMemo(
-    () => buildPath(points, fromNode, toNode, laneKey, portOffset, bendY),
-    [points, fromNode, toNode, laneKey, portOffset, bendY],
+    () => buildPath(points, fromNode, toNode, laneKey, portOffset, bendY, allNodes),
+    [points, fromNode, toNode, laneKey, portOffset, bendY, allNodes],
   );
 
   const handleClick = useCallback(

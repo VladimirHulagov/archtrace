@@ -475,6 +475,7 @@ export const Tree: React.FC<TreeProps> = ({
                   points={pts}
                   portOffset={ports}
                   bendY={bendYs.get(conn.id)}
+                  allNodes={nodes}
                   isSelected={selectedConnectionId === conn.id}
                   onClick={handleConnectionClick}
                   onDelete={handleDeleteConnection}
