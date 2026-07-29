@@ -395,6 +395,7 @@ export const Tree: React.FC<TreeProps> = ({
         centerOnInit={false}
         limitToBounds={false}
         wheel={{ step: 0.05 }}
+        smooth={false}
         doubleClick={{ mode: 'reset' }}
         panning={{ velocityDisabled: true }}
       >
