@@ -6,31 +6,30 @@ import styles from './styles.module.css';
 
 const ENDPOINT_RADIUS = 5;
 const CORNER_RADIUS = 10;
-const LANE_MIN_STEP = 12; // minimum px between parallel horizontal segments
+const LANE_MIN_STEP = 14;
+const LANE_MARGIN = 20;
+const BACKWARD_MARGIN = 60;
 
-// Module-level lane tracker: ensures unique bendY per source-Y band
+// Module-level lane tracker
 const laneTracker = new Map<string, number[]>();
 
-function getUniqueBendY(bandKey: string, idealY: number): number {
+function getUniqueBendY(bandKey: string, idealY: number, min: number, max: number): number {
   let lanes = laneTracker.get(bandKey);
   if (!lanes) { lanes = []; laneTracker.set(bandKey, lanes); }
 
-  // Try idealY first, then nudge until we find a gap
-  let bendY = idealY;
+  let bendY = Math.max(min, Math.min(idealY, max));
   let attempts = 0;
-  while (attempts < 50) {
+  while (attempts < 100) {
     const tooClose = lanes.some(y => Math.abs(y - bendY) < LANE_MIN_STEP);
     if (!tooClose) break;
     bendY += LANE_MIN_STEP;
+    if (bendY > max) bendY = min + (bendY - max) * 0.5;
     attempts++;
   }
   lanes.push(bendY);
-  // Keep lanes sorted for deterministic behavior
-  lanes.sort((a, b) => a - b);
   return bendY;
 }
 
-// Reset lanes when nodes/connections change (called from useMemo)
 let laneResetKey = '';
 export function resetLanes(key: string) {
   if (key !== laneResetKey) {
@@ -51,19 +50,20 @@ interface ConnectionProps {
 }
 
 /**
- * Force a diagonal segment between two points into an orthogonal L-bend.
- * Returns intermediate points to insert between p1 and p2.
+ * Build orthogonal path with guaranteed vertical entry/exit at node edges.
+ * Forward: down → H → down (lane-separated)
+ * Backward: down → right → up → left → down (around right side)
  */
-/**
- * Build a strictly orthogonal path: down → horizontal → down.
- * Uses a lane system to guarantee no two horizontal segments share the same Y.
- * Guarantees vertical entry/exit at top/bottom centers.
- */
-function buildPath(rawPoints: Point[], fromNode: TreeNode, toNode: TreeNode, laneKey: string, portOffset?: PortOffset): string {
+function buildPath(
+  _rawPoints: Point[],
+  fromNode: TreeNode,
+  toNode: TreeNode,
+  laneKey: string,
+  portOffset?: PortOffset,
+): string {
   const fromSize = getNodeSize(fromNode);
   const toSize = getNodeSize(toNode);
 
-  // Distribute exit/entry points across bottom/top edge
   const fromY = fromNode.y + fromSize.height;
   const toY = toNode.y;
   const fromX = portOffset
@@ -73,36 +73,55 @@ function buildPath(rawPoints: Point[], fromNode: TreeNode, toNode: TreeNode, lan
     ? toNode.x + (toSize.width * (portOffset.entryIndex + 1)) / (portOffset.entryCount + 1)
     : toNode.x + toSize.width / 2;
 
-  if (Math.abs(fromX - toX) < 1) {
+  // Straight vertical
+  if (Math.abs(fromX - toX) < 1 && toY > fromY) {
     return `M ${fromX} ${fromY} L ${toX} ${toY}`;
   }
 
-  // Ideal bendY from dagre waypoints or midpoint
-  let idealBend: number;
-  if (rawPoints.length >= 3) {
-    idealBend = rawPoints[Math.floor(rawPoints.length / 2)].y;
-  } else if (rawPoints.length === 2) {
-    idealBend = (rawPoints[0].y + rawPoints[1].y) / 2;
-  } else {
-    idealBend = (fromY + toY) / 2;
+  const isBackward = toY <= fromY;
+
+  if (isBackward) {
+    // Route around the right side
+    const rightX = Math.max(fromNode.x + fromSize.width, toNode.x + toSize.width) + BACKWARD_MARGIN;
+    const downY = fromY + LANE_MARGIN;
+    const upY = toY - LANE_MARGIN;
+
+    const r = Math.min(CORNER_RADIUS, LANE_MARGIN / 2);
+    const dirR = 1;  // always go right
+
+    return [
+      `M ${fromX} ${fromY}`,
+      `L ${fromX} ${downY - r}`,
+      `Q ${fromX} ${downY} ${fromX + r * dirR} ${downY}`,
+      `L ${rightX - r * dirR} ${downY}`,
+      `Q ${rightX} ${downY} ${rightX} ${downY + r}`,
+      `L ${rightX} ${upY - r}`,
+      `Q ${rightX} ${upY} ${rightX - r * dirR} ${upY}`,
+      `L ${toX + r * dirR} ${upY}`,
+      `Q ${toX} ${upY} ${toX} ${upY + r}`,
+      `L ${toX} ${toY}`,
+    ].join(' ');
   }
 
-  // Clamp to gap
-  const minBend = fromY + CORNER_RADIUS * 2 + 5;
-  const maxBend = toY - CORNER_RADIUS * 2 - 5;
-  idealBend = Math.max(minBend, Math.min(idealBend, maxBend));
+  // Forward: down → H → down
+  const minBend = fromY + LANE_MARGIN;
+  const maxBend = toY - LANE_MARGIN;
 
-  // Get unique lane Y — no overlap with other connections in this band
-  const bendY = getUniqueBendY(laneKey, idealBend);
+  if (maxBend <= minBend) {
+    return `M ${fromX} ${fromY} L ${toX} ${toY}`;
+  }
 
-  const r = Math.min(CORNER_RADIUS, Math.abs(bendY - fromY) / 2, Math.abs(toY - bendY) / 2);
+  const idealBend = (fromY + toY) / 2;
+  const bendY = getUniqueBendY(laneKey, idealBend, minBend, maxBend);
+
+  const r = Math.min(CORNER_RADIUS, (bendY - fromY) / 2, (toY - bendY) / 2);
   const direction = toX > fromX ? 1 : -1;
 
   return [
     `M ${fromX} ${fromY}`,
     `L ${fromX} ${bendY - r}`,
-    `Q ${fromX} ${bendY} ${fromX + r * direction} ${bendY}`,
-    `L ${toX - r * direction} ${bendY}`,
+    `Q ${fromX} ${bendY} ${fromX + direction * r} ${bendY}`,
+    `L ${toX - direction * r} ${bendY}`,
     `Q ${toX} ${bendY} ${toX} ${bendY + r}`,
     `L ${toX} ${toY}`,
   ].join(' ');
@@ -122,19 +141,22 @@ export const Connection: React.FC<ConnectionProps> = ({
   const [isHovered, setIsHovered] = React.useState(false);
 
   const laneKey = useMemo(() => {
-    const fromY = Math.round(fromNode.y);
-    const toY = Math.round(toNode.y);
-    return `${Math.min(fromY, toY)}-${Math.max(fromY, toY)}`;
+    const fy = Math.round(fromNode.y);
+    const ty = Math.round(toNode.y);
+    return `${Math.min(fy, ty)}-${Math.max(fy, ty)}`;
   }, [fromNode.y, toNode.y]);
-  
-  const pathData = useMemo(() => buildPath(points, fromNode, toNode, laneKey, portOffset), [points, fromNode, toNode, laneKey, portOffset]);
+
+  const pathData = useMemo(
+    () => buildPath(points, fromNode, toNode, laneKey, portOffset),
+    [points, fromNode, toNode, laneKey, portOffset],
+  );
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
       onClick(connection.id);
     },
-    [onClick, connection.id]
+    [onClick, connection.id],
   );
 
   const handleMouseEnter = useCallback(() => setIsHovered(true), []);
@@ -142,14 +164,12 @@ export const Connection: React.FC<ConnectionProps> = ({
 
   useEffect(() => {
     if (!isSelected) return;
-
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         onDelete(connection.id);
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isSelected, onDelete, connection.id]);
@@ -159,17 +179,15 @@ export const Connection: React.FC<ConnectionProps> = ({
   const crossRefClass = connection.kind === 'cross-ref' ? styles['connection--cross-ref'] : '';
   const endpointClass = `${styles.endpoint} ${isHovered || isSelected ? styles['endpoint--hover'] : ''}`;
 
-  // Recompute start/end for circles (matching buildPath port offsets)
-  const fromSize2 = getNodeSize(fromNode);
-  const toSize2 = getNodeSize(toNode);
-  const startPort = pathData ? pathData.match(/M\s+([\d.]+)\s+([\d.]+)/) : null;
-  const endPort = pathData ? pathData.match(/L\s+([\d.]+)\s+([\d.]+)\s*$/) : null;
-  const startPoint = startPort
-    ? { x: parseFloat(startPort[1]), y: parseFloat(startPort[2]) }
-    : { x: fromNode.x + fromSize2.width / 2, y: fromNode.y + fromSize2.height };
-  const endPoint = endPort
-    ? { x: parseFloat(endPort[1]), y: parseFloat(endPort[2]) }
-    : { x: toNode.x + toSize2.width / 2, y: toNode.y };
+  // Extract start/end from path for endpoint circles
+  const startMatch = pathData.match(/M\s+([\d.]+)\s+([\d.]+)/);
+  const endMatch = pathData.match(/L\s+([\d.]+)\s+([\d.]+)\s*$/);
+  const startPoint = startMatch
+    ? { x: parseFloat(startMatch[1]), y: parseFloat(startMatch[2]) }
+    : { x: fromNode.x, y: fromNode.y };
+  const endPoint = endMatch
+    ? { x: parseFloat(endMatch[1]), y: parseFloat(endMatch[2]) }
+    : { x: toNode.x, y: toNode.y };
 
   return (
     <g>
@@ -184,18 +202,8 @@ export const Connection: React.FC<ConnectionProps> = ({
         role="button"
         aria-label={`Connection from ${fromNode.text} to ${toNode.text}`}
       />
-      <circle
-        cx={startPoint.x}
-        cy={startPoint.y}
-        r={ENDPOINT_RADIUS}
-        className={endpointClass}
-      />
-      <circle
-        cx={endPoint.x}
-        cy={endPoint.y}
-        r={ENDPOINT_RADIUS}
-        className={endpointClass}
-      />
+      <circle cx={startPoint.x} cy={startPoint.y} r={ENDPOINT_RADIUS} className={endpointClass} />
+      <circle cx={endPoint.x} cy={endPoint.y} r={ENDPOINT_RADIUS} className={endpointClass} />
     </g>
   );
 };

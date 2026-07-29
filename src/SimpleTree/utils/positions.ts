@@ -115,11 +115,11 @@ export function calculateLayout(
 
   g.setGraph({
     rankdir: 'TB',
-    nodesep: HORIZONTAL_GAP,
-    ranksep: 80,
+    nodesep: 60,
+    ranksep: 100,
     marginx: PADDING,
     marginy: PADDING,
-    edgesep: 25,
+    edgesep: 30,
   });
 
   g.setDefaultEdgeLabel(() => ({}));
