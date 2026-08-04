@@ -48,7 +48,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [commentText, setCommentText] = useState('');
   const [showAddOption, setShowAddOption] = useState(false);
-  const [newOptionLetter, setNewOptionLetter] = useState('');
   const [newOptionTitle, setNewOptionTitle] = useState('');
   const [isEditingContext, setIsEditingContext] = useState(false);
   const [editingContext, setEditingContext] = useState('');
@@ -150,13 +149,21 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   }, [comments, onCommentsChange]);
 
   const handleAddOption = useCallback(async () => {
-    if (!newOptionLetter.trim() || !newOptionTitle.trim()) return;
+    if (!newOptionTitle.trim()) return;
+    // Auto-compute next letter: A, B, C, D, E, F...
+    const usedLetters = new Set(allOptions.map(o => o.letter));
+    let nextLetter = '';
+    for (let i = 65; i <= 90; i++) {
+      const l = String.fromCharCode(i);
+      if (!usedLetters.has(l)) { nextLetter = l; break; }
+    }
+    if (!nextLetter) nextLetter = String.fromCharCode(65 + allOptions.length);
     try {
-      const opt = await addCustomOptionApi(detail.id, newOptionLetter.trim().toUpperCase(), newOptionTitle.trim());
+      const opt = await addCustomOptionApi(detail.id, nextLetter, newOptionTitle.trim());
       onCustomOptionsChange([...customOptions, opt]);
-      setNewOptionLetter(''); setNewOptionTitle(''); setShowAddOption(false);
+      setNewOptionTitle(''); setShowAddOption(false);
     } catch (err) { console.error('Add option error:', err); }
-  }, [newOptionLetter, newOptionTitle, detail, customOptions, onCustomOptionsChange]);
+  }, [newOptionTitle, detail, customOptions, onCustomOptionsChange, allOptions]);
 
   const handleSaveContext = useCallback(() => {
     const nv = [...contextVersions, editingContext];
@@ -301,8 +308,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             {showAddOption ? (
               <div style={{ marginBottom: '8px', padding: '8px', background: '#f5f5f5', borderRadius: '4px' }}>
                 <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
-                  <input type="text" placeholder="Буква" value={newOptionLetter} onChange={e => setNewOptionLetter(e.target.value)} style={inputStyle(60)} />
-                  <input type="text" placeholder="Название..." value={newOptionTitle} onChange={e => setNewOptionTitle(e.target.value)} style={inputStyle(0)} />
+                  <input type="text" placeholder="Название варианта..." value={newOptionTitle} onChange={e => setNewOptionTitle(e.target.value)} style={{ flex: 1, padding: '4px', border: '1px solid #d0d0d0', borderRadius: '3px', fontSize: '13px' }} autoFocus />
                 </div>
                 <div style={{ display: 'flex', gap: '6px' }}>
                   <button onClick={handleAddOption} style={btnPrimary}>Добавить</button>
@@ -398,7 +404,16 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                       <span style={{ fontSize: '10px', color: '#999' }}>
                         {new Date(c.created_at).toLocaleDateString('ru', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                       </span>
-                      <button onClick={() => handleDeleteComment(c.id)} style={btnIcon}>×</button>
+                      <button
+                        onClick={() => {
+                          if (confirm('Удалить комментарий?')) handleDeleteComment(c.id);
+                        }}
+                        title="Удалить"
+                        style={{
+                          border: 'none', background: 'none', cursor: 'pointer',
+                          color: '#cc4444', fontSize: '14px', padding: '2px',
+                        }}
+                      >🗑</button>
                     </div>
                   </div>
                   <div style={{ fontSize: '12px', color: '#333', lineHeight: 1.4, marginBottom: '6px' }}>{c.content}</div>
