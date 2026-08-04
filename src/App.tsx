@@ -57,6 +57,10 @@ function App() {
   const [currentUser, setCurrentUser] = useState<{ id: number; username: string; role: string } | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showRepoSetup, setShowRepoSetup] = useState(false);
+  const [repoSetupProject, setRepoSetupProject] = useState<Project | null>(null);
+  const [repoUrl, setRepoUrl] = useState('');
+  const [repoFolder, setRepoFolder] = useState('');
   const [users, setUsers] = useState<{ id: number; username: string; role: string }[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<SyncResult | null>(null);
@@ -101,7 +105,21 @@ function App() {
     setProjectId(project.id);
     setShowProjectMenu(false);
     setSelectedDetail(null);
-    // Fetch graph with the NEW project ID directly (not via state)
+
+    // If project has no git repo, show setup modal
+    if (!project.git_repo_url) {
+      const prevUrl = currentProject?.git_repo_url || 'https://github.com/VladimirHulagov/archtrace-decisions.git';
+      // Extract base URL (without folder) for display
+      const baseUrl = prevUrl.replace(/\/[^/]+\.git$/, '/');
+      setRepoUrl(baseUrl);
+      setRepoFolder('');
+      setRepoSetupProject(project);
+      setShowRepoSetup(true);
+      // Don't load graph yet — wait for modal
+      setNodes([]); setConnections([]); setEdgePoints(new Map());
+      return;
+    }
+
     try {
       const graph = await fetchGraph(project.id);
       const treeNodes = graph.nodes.map(decisionToTreeNode);
@@ -188,6 +206,17 @@ function App() {
     } catch (err) { console.error('Failed to add option:', err); }
   }, [selectedDetail, newOptionLetter, newOptionTitle]);
 
+  // Sync URL hash on state changes
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (currentProject) params.set('project', String(currentProject.id));
+    if (selectedDetail) params.set('node', selectedDetail.id);
+    const hash = params.toString();
+    if (hash && window.location.hash !== '#' + hash) {
+      window.location.hash = hash;
+    }
+  }, [currentProject, selectedDetail]);
+
   const handleNodeClick = useCallback((node: TreeNode) => {
     fetch(`/api/decisions/${node.id}`).then(r => r.json()).then(data => {
       setSelectedDetail(data);
@@ -201,13 +230,36 @@ function App() {
   // ─── Fetch graph on mount ──────────────────────────────
 
   useEffect(() => {
-    fetchProjects().then(setProjects).catch(() => {});
+    // Restore state from URL hash
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const initialPid = parseInt(params.get('project') || '1', 10);
+    const initialNode = params.get('node');
+
+    fetchProjects().then(ps => {
+      setProjects(ps);
+      const proj = ps.find(p => p.id === initialPid);
+      if (proj) { setCurrentProject(proj); setProjectId(proj.id); }
+    }).catch(() => {});
     fetch('/api/users').then(r => r.json()).then(setUsers).catch(() => {});
-    fetchGraph().then((graph: Graph) => {
+
+    fetchGraph(initialPid).then((graph: Graph) => {
       const treeNodes = graph.nodes.map(decisionToTreeNode);
       const treeConnections = graph.connections.map(c => ({ id: c.id, from: c.from, to: c.to, kind: c.kind }));
       const { nodes: positioned, edgePoints: ePoints } = calculateLayout(treeNodes, treeConnections, window.innerWidth);
       setNodes(positioned); setConnections(treeConnections); setEdgePoints(ePoints); setLoading(false);
+
+      // Restore selected node
+      if (initialNode) {
+        fetch(`/api/decisions/${initialNode}?projectId=${initialPid}`)
+          .then(r => r.json()).then(data => {
+            if (data && data.id) {
+              setSelectedDetail(data);
+              fetchComments(initialNode).then(setComments).catch(() => {});
+              fetchVotes(initialNode).then(setVotes).catch(() => {});
+              fetchCustomOptions(initialNode).then(setCustomOptions).catch(() => {});
+            }
+          }).catch(() => {});
+      }
     }).catch((err) => { setError(err.message); setLoading(false); });
   }, []);
 
@@ -369,6 +421,84 @@ function App() {
           onClose={() => setSelectedDetail(null)}
         />
       )}
+      {/* Repo Setup Modal */}
+      {showRepoSetup && repoSetupProject && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 3000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }} onClick={() => setShowRepoSetup(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: '#fff', borderRadius: '8px', padding: '24px',
+            width: '480px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+          }}>
+            <h2 style={{ margin: '0 0 16px 0', fontSize: '18px' }}>Подключение репозитория</h2>
+            <p style={{ fontSize: '13px', color: '#666', marginBottom: '16px' }}>
+              Проект «{repoSetupProject.name}» не имеет репозитория с ADR.
+              Укажите Git-репозиторий:
+            </p>
+
+            {/* URL display (editable on click) */}
+            <label style={{ display: 'block', fontSize: '12px', color: '#999', marginBottom: '4px' }}>URL репозитория</label>
+            <input
+              type="text"
+              value={repoUrl}
+              onChange={e => setRepoUrl(e.target.value)}
+              style={{
+                width: '100%', padding: '8px', marginBottom: '12px',
+                border: '1px solid #d0d0d0', borderRadius: '4px',
+                fontSize: '13px', color: '#999', boxSizing: 'border-box',
+              }}
+            />
+
+            {/* Folder name */}
+            <label style={{ display: 'block', fontSize: '12px', color: '#999', marginBottom: '4px' }}>Папка с ADR (внутри репозитория)</label>
+            <input
+              type="text"
+              placeholder="например: decisions или . (корень)"
+              value={repoFolder}
+              onChange={e => setRepoFolder(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') {
+                // Submit
+                const fullUrl = repoUrl + (repoFolder ? repoFolder : '');
+                fetch('/api/projects/' + repoSetupProject.id, {
+                  method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ git_repo_url: repoUrl + (repoFolder.endsWith('.git') ? repoFolder : repoFolder + '.git') }),
+                }).then(() => {
+                  setShowRepoSetup(false);
+                  if (repoSetupProject) handleProjectSwitch({ ...repoSetupProject, git_repo_url: repoUrl });
+                });
+              }}}
+              style={{
+                width: '100%', padding: '8px', marginBottom: '16px',
+                border: '1px solid #1890ff', borderRadius: '4px',
+                fontSize: '13px', color: '#333', boxSizing: 'border-box',
+              }}
+              autoFocus
+            />
+
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowRepoSetup(false)} style={{
+                padding: '8px 16px', border: '1px solid #d0d0d0', background: '#f0f0f0',
+                borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+              }}>Отмена</button>
+              <button onClick={() => {
+                const finalUrl = repoUrl.endsWith('.git') ? repoUrl : repoUrl.replace(/\/$/, '') + (repoFolder ? '/' + repoFolder : '') + '.git';
+                fetch('/api/projects/' + repoSetupProject.id, {
+                  method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ git_repo_url: finalUrl }),
+                }).then(() => {
+                  setShowRepoSetup(false);
+                  handleProjectSwitch({ ...repoSetupProject, git_repo_url: finalUrl });
+                });
+              }} style={{
+                padding: '8px 16px', border: 'none', background: '#1890ff', color: '#fff',
+                borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold',
+              }}>Подключить</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Create Decision Modal */}
       {showCreateForm && (
         <CreateDecisionForm
@@ -410,6 +540,10 @@ function CreateDecisionForm({ nodes, onClose, onCreated }: {
   const [parent, setParent] = useState('');
   const [type, setType] = useState('decision');
   const [context, setContext] = useState('');
+  const [optionA, setOptionA] = useState('');
+  const [optionB, setOptionB] = useState('');
+  const [decision, setDecision] = useState('');
+  const [consequences, setConsequences] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -418,11 +552,17 @@ function CreateDecisionForm({ nodes, onClose, onCreated }: {
     setSaving(true);
     setError('');
     try {
+      const options = [];
+      if (optionA.trim()) options.push({ letter: 'A', title: optionA.trim() });
+      if (optionB.trim()) options.push({ letter: 'B', title: optionB.trim() });
       await createDecision({
         title: title.trim(),
         parent: parent || null,
         type,
         context: context.trim() || undefined,
+        options: options.length > 0 ? options : undefined,
+        decision: decision.trim() || undefined,
+        consequences: consequences.trim() || undefined,
       });
       onCreated();
     } catch (err: any) {
@@ -486,6 +626,33 @@ function CreateDecisionForm({ nodes, onClose, onCreated }: {
             placeholder="Описание контекста и предпосылок..."
             style={{ width: '100%', minHeight: '80px', padding: '8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'inherit' }}
           />
+        </div>
+
+        {/* Options */}
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Варианты</label>
+          <input type="text" value={optionA} onChange={e => setOptionA(e.target.value)}
+            placeholder="A: первый вариант..."
+            style={{ width: '100%', padding: '6px 8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px', marginBottom: '6px', boxSizing: 'border-box' }} />
+          <input type="text" value={optionB} onChange={e => setOptionB(e.target.value)}
+            placeholder="B: второй вариант..."
+            style={{ width: '100%', padding: '6px 8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px', boxSizing: 'border-box' }} />
+        </div>
+
+        {/* Decision */}
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Решение</label>
+          <textarea value={decision} onChange={e => setDecision(e.target.value)}
+            placeholder="Какой вариант выбран и почему..."
+            style={{ width: '100%', minHeight: '50px', padding: '8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'inherit' }} />
+        </div>
+
+        {/* Consequences */}
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Последствия</label>
+          <textarea value={consequences} onChange={e => setConsequences(e.target.value)}
+            placeholder="Следствия принятого решения..."
+            style={{ width: '100%', minHeight: '50px', padding: '8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'inherit' }} />
         </div>
 
         {error && <div style={{ color: '#ff4d4f', fontSize: '12px', marginBottom: '8px' }}>{error}</div>}

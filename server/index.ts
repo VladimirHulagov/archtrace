@@ -588,6 +588,35 @@ app.get('/api/decisions/:id/analysis', async (req, res) => {
   }
 });
 
+/**
+ * PUT /api/projects/:id
+ * Update project (e.g., set git_repo_url).
+ */
+app.put('/api/projects/:id', async (req, res) => {
+  try {
+    const pid = parseInt(req.params.id, 10);
+    const { git_repo_url, name, description } = req.body;
+
+    // Update in DB
+    if (git_repo_url !== undefined) {
+      await query('UPDATE projects SET git_repo_url = $2 WHERE id = $1', [pid, git_repo_url]);
+    }
+    if (name) {
+      await query('UPDATE projects SET name = $2 WHERE id = $1', [pid, name]);
+    }
+    if (description !== undefined) {
+      await query('UPDATE projects SET description = $2 WHERE id = $1', [pid, description]);
+    }
+
+    // Clear dir cache so it re-clones
+    projectDirCache.delete(pid);
+
+    res.json({ status: 'ok' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/db-health', async (_req, res) => {
   const ok = await checkDb();
   res.json({ db: ok ? 'ok' : 'error' });

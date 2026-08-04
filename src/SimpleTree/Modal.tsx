@@ -12,20 +12,20 @@ export interface ModalProps {
 }
 
 const STATUS_OPTIONS = [
-  { value: '', label: 'None' },
-  { value: 'success', label: 'Success' },
-  { value: 'warning', label: 'Warning' },
-  { value: 'error', label: 'Error' },
-  { value: 'info', label: 'Info' },
+  { value: '', label: 'Нет' },
+  { value: 'success', label: 'Успех' },
+  { value: 'warning', label: 'Предупреждение' },
+  { value: 'error', label: 'Ошибка' },
+  { value: 'info', label: 'Информация' },
 ];
 
 const ICON_OPTIONS = [
   { value: '', label: 'None' },
-  { value: '📄', label: 'Document' },
-  { value: '📁', label: 'Folder' },
-  { value: '✓', label: 'Check' },
-  { value: '★', label: 'Star' },
-  { value: '●', label: 'Circle' },
+  { value: '📄', label: 'Документ' },
+  { value: '📁', label: 'Папка' },
+  { value: '✓', label: 'Галочка' },
+  { value: '★', label: 'Звезда' },
+  { value: '●', label: 'Круг' },
 ];
 
 export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel, readOnly, onEdit }) => {
@@ -95,11 +95,11 @@ export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel, re
     >
       <div className={styles.modal} ref={modalRef}>
         <div className={styles.modal__header}>
-          <h3 className={styles.modal__title} id="modal-title">{readOnly ? 'Node Details' : 'Edit Node'}</h3>
+          <h3 className={styles.modal__title} id="modal-title">{readOnly ? 'Карточка решения' : 'Редактирование'}</h3>
           <button 
             className={styles.modal__close}
             onClick={onCancel}
-            aria-label="Close"
+            aria-label="Закрыть"
             type="button"
           >
             ×
@@ -108,7 +108,7 @@ export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel, re
         
         <div className={styles.modal__body}>
           <div className={styles.field}>
-            <label className={styles.field__label} htmlFor="node-title">Title</label>
+            <label className={styles.field__label} htmlFor="node-title">Название</label>
             {readOnly ? (
               <div className={styles.field__readonly}>{title}</div>
             ) : (
@@ -125,7 +125,7 @@ export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel, re
           </div>
 
           <div className={styles.field}>
-            <label className={styles.field__label} htmlFor="node-description">Description</label>
+            <label className={styles.field__label} htmlFor="node-description">Контекст</label>
             {readOnly ? (
               <div className={styles.field__readonly}>{description || '—'}</div>
             ) : (
@@ -141,7 +141,7 @@ export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel, re
           </div>
 
           <div className={styles.field}>
-            <label className={styles.field__label} htmlFor="node-status">Status</label>
+            <label className={styles.field__label} htmlFor="node-status">Статус</label>
             {readOnly ? (
               <div className={styles.field__readonly}>{STATUS_OPTIONS.find(o => o.value === status)?.label || 'None'}</div>
             ) : (
@@ -161,7 +161,7 @@ export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel, re
           </div>
 
           <div className={styles.field}>
-            <label className={styles.field__label} htmlFor="node-icon">Icon</label>
+            <label className={styles.field__label} htmlFor="node-icon">Иконка</label>
             {readOnly ? (
               <div className={styles.field__readonly}>{icon || 'None'}</div>
             ) : (
