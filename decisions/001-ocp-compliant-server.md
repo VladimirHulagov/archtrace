@@ -1,6 +1,6 @@
 ---
 id: "001"
-title: "Build an OCP-compliant datacenter server"
+title: "OCP-совместимый сервер для дата-центра"
 status: accepted
 type: requirement
 parent: null
@@ -10,34 +10,35 @@ decided: 2026-07-21
 voters: []
 ---
 
-## Context
+## Контекст
 
-We need to design and manufacture a server that meets Open Compute Project (OCP)
-specifications for deployment in hyperscale datacenter environments.
+Необходимо спроектировать и произвести сервер, соответствующий спецификациям
+Open Compute Project (OCP) для развёртывания в гипермасштабируемых дата-центрах.
 
-Key OCP standards in scope:
+Ключевые стандарты OCP в области ответственности:
 
-- **Open Rack V3** (21-inch chassis, 48V bus bar, OU units)
-- **DC-MHS** (Datacenter Modular Hardware System)
-- **DC-SCM** (Datacenter Secure Control Module)
-- **OCP NIC 3.0** (standardized networking)
-- **OpenBMC / Redfish** (hardware management)
-- **Hardware Management** (RAS, firmware update)
+- **Open Rack V3** (шасси 21 дюйм, шина 48В, юницы OU)
+- **DC-MHS** (модульная аппаратная система дата-центра)
+- **DC-SCM** (модуль безопасного управления дата-центра)
+- **OCP NIC 3.0** (стандартизированный сетевой интерфейс)
+- **OpenBMC / Redfish** (управление оборудованием)
+- **Hardware Management** (надёжность, обновление прошивок)
 
-## Requirement
+## Требование
 
-Design a complete server system that is OCP Accepted certified:
-- Fits Open Rack V3 ecosystem
-- Meets 48V power delivery spec
-- Has modular DC-MHS compatible form factor
-- Integrates DC-SCM for management
-- Supports OCP NIC 3.0
-- Compliant with OCP firmware update requirements
-- Meets OCP thermal and airflow guidelines
+Спроектировать полноценную серверную систему с сертификацией OCP Accepted:
 
-## Consequences
+- Соответствие экосистеме Open Rack V3
+- Поддержка спецификации электропитания 48В
+- Модульный форм-фактор, совместимый с DC-MHS
+- Интеграция DC-SCM для управления
+- Поддержка OCP NIC 3.0
+- Соответствие требованиям OCP к обновлению прошивок
+- Соответствие тепловым требованиям и требованиям к воздушному потоку OCP
 
-- Must follow all OCP specs (not custom form factors)
-- Supply chain constrained to OCP-compatible components
-- Certification process required before GA
-- Interoperability with any OCP rack guaranteed
+## Последствия
+
+- Необходимо следовать всем спецификациям OCP (без кастомных форм-факторов)
+- Цепочка поставок ограничена OCP-совместимыми компонентами
+- Требуется процесс сертификации перед выпуском (GA)
+- Гарантирована совместимость с любой стойкой OCP

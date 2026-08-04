@@ -17,6 +17,7 @@ import { syncRepo, isRepoReady, getActiveDecisionsDir } from './git-sync.js';
 import {
   getComments, addComment, deleteComment,
   getVotes, castVote, removeVote,
+  toggleReaction,
   getCustomOptions, addCustomOption,
   getOrCreateUser, getUserById, getProjects,
   checkDb,
@@ -319,6 +320,26 @@ app.post('/api/options/:nodeId', async (req, res) => {
 app.get('/api/db-health', async (_req, res) => {
   const ok = await checkDb();
   res.json({ db: ok ? 'ok' : 'error' });
+});
+
+
+/**
+ * POST /api/comments/:commentId/react
+ * Toggle like/dislike on a comment. Body: { reaction: 'like' | 'dislike' }
+ */
+app.post('/api/comments/:commentId/react', async (req, res) => {
+  try {
+    const commentId = parseInt(req.params.commentId, 10);
+    const { reaction } = req.body;
+    if (reaction !== 'like' && reaction !== 'dislike') {
+      return res.status(400).json({ error: 'reaction must be like or dislike' });
+    }
+    const userId = 1; // TODO: real auth
+    const result = await toggleReaction(commentId, userId, reaction);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Static frontend (production) ─────────────────────────

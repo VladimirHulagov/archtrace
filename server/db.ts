@@ -86,6 +86,9 @@ export interface Comment {
   author_name?: string;
   author_avatar?: string | null;
   content: string;
+  likes: number;
+  dislikes: number;
+  user_reaction?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -117,7 +120,8 @@ export interface CustomOption {
 
 export async function getComments(nodeId: string, projectId: number = 1): Promise<Comment[]> {
   return query(
-    `SELECT c.*, u.username AS author_name, u.avatar_url AS author_avatar
+    `SELECT c.*, u.username AS author_name, u.avatar_url AS author_avatar,
+            c.likes, c.dislikes
      FROM comments c
      JOIN users u ON c.author_id = u.id
      WHERE c.node_id = $1 AND c.project_id = $2
@@ -225,6 +229,74 @@ export async function addCustomOption(
     [nodeId, projectId, letter, title, createdBy]
   );
   return rows[0];
+}
+
+
+// ─── Comment Reactions API ───────────────────────────────
+
+export async function toggleReaction(commentId: number, userId: number, reaction: 'like' | 'dislike'): Promise<{ likes: number; dislikes: number; userReaction: string | null }> {
+  // Check existing reaction
+  const existing = await queryOne(
+    'SELECT reaction FROM comment_reactions WHERE comment_id = $1 AND user_id = $2',
+    [commentId, userId]
+  );
+
+  if (existing) {
+    if (existing.reaction === reaction) {
+      // Same reaction — remove it (toggle off)
+      await query('DELETE FROM comment_reactions WHERE comment_id = $1 AND user_id = $2', [commentId, userId]);
+    } else {
+      // Different reaction — update
+      await query('UPDATE comment_reactions SET reaction = $3 WHERE comment_id = $1 AND user_id = $2', [commentId, userId, reaction]);
+    }
+  } else {
+    // No existing reaction — add new
+    await query(
+      'INSERT INTO comment_reactions (comment_id, user_id, reaction) VALUES ($1, $2, $3)',
+      [commentId, userId, reaction]
+    );
+  }
+
+  // Recount
+  const likes = await queryOne('SELECT COUNT(*)::int AS count FROM comment_reactions WHERE comment_id = $1 AND reaction = $2', [commentId, 'like']);
+  const dislikes = await queryOne('SELECT COUNT(*)::int AS count FROM comment_reactions WHERE comment_id = $1 AND reaction = $2', [commentId, 'dislike']);
+  const userReact = await queryOne('SELECT reaction FROM comment_reactions WHERE comment_id = $1 AND user_id = $2', [commentId, userId]);
+
+  // Update denormalized counts
+  await query('UPDATE comments SET likes = $2, dislikes = $3 WHERE id = $1', [commentId, likes?.count || 0, dislikes?.count || 0]);
+
+  return {
+    likes: likes?.count || 0,
+    dislikes: dislikes?.count || 0,
+    userReaction: userReact?.reaction || null,
+  };
+}
+
+export async function getReactionsForComments(commentIds: number[], userId: number): Promise<Record<number, { likes: number; dislikes: number; userReaction: string | null }>> {
+  if (commentIds.length === 0) return {};
+  const result: Record<number, any> = {};
+  for (const id of commentIds) {
+    result[id] = { likes: 0, dislikes: 0, userReaction: null };
+  }
+
+  const rows = await query(
+    `SELECT comment_id, reaction FROM comment_reactions WHERE comment_id = ANY($1)`,
+    [commentIds]
+  );
+  for (const r of rows) {
+    if (r.reaction === 'like') result[r.comment_id].likes++;
+    else result[r.comment_id].dislikes++;
+  }
+
+  const userRows = await query(
+    `SELECT comment_id, reaction FROM comment_reactions WHERE comment_id = ANY($1) AND user_id = $2`,
+    [commentIds, userId]
+  );
+  for (const r of userRows) {
+    result[r.comment_id].userReaction = r.reaction;
+  }
+
+  return result;
 }
 
 // ─── Users API ───────────────────────────────────────────

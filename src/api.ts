@@ -61,6 +61,9 @@ export interface Comment {
   author_name?: string;
   author_avatar?: string | null;
   content: string;
+  likes: number;
+  dislikes: number;
+  user_reaction?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -106,6 +109,16 @@ export async function postComment(nodeId: string, content: string, parentComment
 
 export async function deleteCommentApi(commentId: number): Promise<void> {
   await fetch(`${API_BASE}/comments/${commentId}`, { method: 'DELETE' });
+}
+
+export async function reactToComment(commentId: number, reaction: 'like' | 'dislike'): Promise<{ likes: number; dislikes: number; userReaction: string | null }> {
+  const res = await fetch(`${API_BASE}/comments/${commentId}/react`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reaction }),
+  });
+  if (!res.ok) throw new Error('Failed to react');
+  return res.json();
 }
 
 export async function fetchVotes(nodeId: string): Promise<Vote[]> {

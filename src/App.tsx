@@ -202,20 +202,20 @@ function App() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', position: 'relative' }}>
-      {/* Sync button */}
+      {/* Sync button — bottom-left, away from panel controls */}
       <button onClick={handleSync} disabled={syncing} style={{
-        position: 'fixed', top: '12px', right: '12px', zIndex: 1000,
+        position: 'fixed', bottom: '16px', left: '16px', zIndex: 1000,
         padding: '6px 14px', borderRadius: '6px', border: '1px solid #d0d0d0',
         background: syncing ? '#f0f0f0' : '#fff', cursor: syncing ? 'wait' : 'pointer',
-        fontSize: '13px', color: '#333', boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
-      }} title="Pull from Git">
-        {syncing ? '⟳ Syncing...' : '⇅ Sync'}
+        fontSize: '12px', color: '#666', boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+      }} title="Обновить из Git">
+        {syncing ? '⟳...' : '⇅ Синхр.'}
       </button>
 
       {/* Sync banner */}
       {showSyncBanner && lastSync && (
         <div style={{
-          position: 'fixed', top: '48px', right: '12px', zIndex: 1000,
+          position: 'fixed', bottom: '52px', left: '16px', zIndex: 1000,
           padding: '8px 14px', borderRadius: '6px', maxWidth: '360px',
           background: lastSync.success ? '#f6ffed' : '#fff2f0',
           border: `1px solid ${lastSync.success ? '#b7eb8f' : '#ffccc7'}`,
