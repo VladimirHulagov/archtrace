@@ -279,13 +279,14 @@ export function buildGraph(decisionsDir: string = DECISIONS_DIR): Graph {
 
   // Read all .md files
   const files = fs.readdirSync(decisionsDir)
-    .filter(f => f.endsWith('.md'))
+    .filter(f => f.endsWith('.md') && !f.startsWith('README'))
     .sort();
 
   for (const file of files) {
     const fullPath = path.join(decisionsDir, file);
     const node = parseDecisionFile(fullPath);
-    if (node) {
+    // Skip files without frontmatter id (e.g. README.md)
+    if (node && node.id && node.id !== 'README' && node.title !== 'Untitled') {
       nodes.push(node);
     }
   }
