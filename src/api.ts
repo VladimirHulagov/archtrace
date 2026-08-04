@@ -49,6 +49,101 @@ export interface SyncStatus {
   localFallback: boolean;
 }
 
+
+// ─── DB Types ────────────────────────────────────────────
+
+export interface Comment {
+  id: number;
+  node_id: string;
+  project_id: number;
+  parent_comment_id: number | null;
+  author_id: number;
+  author_name?: string;
+  author_avatar?: string | null;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Vote {
+  id: number;
+  node_id: string;
+  option_letter: string;
+  user_id: number;
+  username?: string;
+  weight: number;
+  rationale: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomOption {
+  id: number;
+  node_id: string;
+  letter: string;
+  title: string;
+  created_by: number | null;
+  created_at: string;
+}
+
+// ─── DB API Functions ────────────────────────────────────
+
+export async function fetchComments(nodeId: string): Promise<Comment[]> {
+  const res = await fetch(`${API_BASE}/comments/${nodeId}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function postComment(nodeId: string, content: string, parentCommentId?: number): Promise<Comment> {
+  const res = await fetch(`${API_BASE}/comments/${nodeId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, parentCommentId }),
+  });
+  if (!res.ok) throw new Error('Failed to post comment');
+  return res.json();
+}
+
+export async function deleteCommentApi(commentId: number): Promise<void> {
+  await fetch(`${API_BASE}/comments/${commentId}`, { method: 'DELETE' });
+}
+
+export async function fetchVotes(nodeId: string): Promise<Vote[]> {
+  const res = await fetch(`${API_BASE}/votes/${nodeId}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function castVoteApi(nodeId: string, optionLetter: string, weight: number, rationale?: string): Promise<Vote> {
+  const res = await fetch(`${API_BASE}/votes/${nodeId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ optionLetter, weight, rationale }),
+  });
+  if (!res.ok) throw new Error('Failed to cast vote');
+  return res.json();
+}
+
+export async function removeVoteApi(nodeId: string): Promise<void> {
+  await fetch(`${API_BASE}/votes/${nodeId}`, { method: 'DELETE' });
+}
+
+export async function fetchCustomOptions(nodeId: string): Promise<CustomOption[]> {
+  const res = await fetch(`${API_BASE}/options/${nodeId}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function addCustomOptionApi(nodeId: string, letter: string, title: string): Promise<CustomOption> {
+  const res = await fetch(`${API_BASE}/options/${nodeId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ letter, title }),
+  });
+  if (!res.ok) throw new Error('Failed to add option');
+  return res.json();
+}
+
 const API_BASE = '/api';
 
 export async function fetchGraph(): Promise<Graph> {

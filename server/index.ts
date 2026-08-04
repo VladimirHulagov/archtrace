@@ -14,6 +14,13 @@ import { fileURLToPath } from 'url';
 import { buildGraph, tallyVotes, type DecisionNode } from './parse.js';
 import { loadConfig, saveConfig, type ArchTraceConfig } from './config.js';
 import { syncRepo, isRepoReady, getActiveDecisionsDir } from './git-sync.js';
+import {
+  getComments, addComment, deleteComment,
+  getVotes, castVote, removeVote,
+  getCustomOptions, addCustomOption,
+  getOrCreateUser, getUserById, getProjects,
+  checkDb,
+} from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const localDecisionsDir = path.resolve(__dirname, '..', 'decisions');
@@ -161,6 +168,159 @@ app.post('/api/client-errors', (req, res) => {
   res.status(204).end();
 });
 
+// ─── DB-backed routes: comments, votes, options ──────────
+
+const DEFAULT_PROJECT_ID = 1;
+
+/**
+ * GET /api/comments/:nodeId
+ * Get all comments for a node.
+ */
+app.get('/api/comments/:nodeId', async (req, res) => {
+  try {
+    const comments = await getComments(req.params.nodeId, DEFAULT_PROJECT_ID);
+    res.json(comments);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/comments/:nodeId
+ * Add a comment. Body: { content, parentCommentId }
+ * Temporarily uses a default user until OAuth is implemented.
+ */
+app.post('/api/comments/:nodeId', async (req, res) => {
+  try {
+    const { content, parentCommentId } = req.body;
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: 'Content is required' });
+    }
+
+    // TODO: Replace with real auth. For now use default admin user (id=1).
+    const userId = 1;
+
+    const comment = await addComment(
+      req.params.nodeId, DEFAULT_PROJECT_ID, userId, content.trim(), parentCommentId || null
+    );
+    res.status(201).json(comment);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/comments/:commentId
+ * Delete a comment (author only).
+ */
+app.delete('/api/comments/:commentId', async (req, res) => {
+  try {
+    const commentId = parseInt(req.params.commentId, 10);
+    const userId = 1; // TODO: real auth
+    const deleted = await deleteComment(commentId, userId);
+    if (!deleted) return res.status(404).json({ error: 'Comment not found or not owned' });
+    res.status(204).end();
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/votes/:nodeId
+ * Get all votes for a node.
+ */
+app.get('/api/votes/:nodeId', async (req, res) => {
+  try {
+    const votes = await getVotes(req.params.nodeId, DEFAULT_PROJECT_ID);
+    res.json(votes);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/votes/:nodeId
+ * Cast or update a vote. Body: { optionLetter, weight, rationale }
+ */
+app.post('/api/votes/:nodeId', async (req, res) => {
+  try {
+    const { optionLetter, weight, rationale } = req.body;
+    if (!optionLetter) {
+      return res.status(400).json({ error: 'optionLetter is required' });
+    }
+
+    const userId = 1; // TODO: real auth
+    const userWeight = weight || 1;
+
+    const vote = await castVote(
+      req.params.nodeId, DEFAULT_PROJECT_ID, userId,
+      optionLetter, userWeight, rationale || null
+    );
+    res.status(201).json(vote);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/votes/:nodeId
+ * Remove user vote.
+ */
+app.delete('/api/votes/:nodeId', async (req, res) => {
+  try {
+    const userId = 1; // TODO: real auth
+    const removed = await removeVote(req.params.nodeId, DEFAULT_PROJECT_ID, userId);
+    if (!removed) return res.status(404).json({ error: 'Vote not found' });
+    res.status(204).end();
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/options/:nodeId
+ * Get custom options for a node (beyond those in the ADR markdown).
+ */
+app.get('/api/options/:nodeId', async (req, res) => {
+  try {
+    const options = await getCustomOptions(req.params.nodeId, DEFAULT_PROJECT_ID);
+    res.json(options);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/options/:nodeId
+ * Add a custom option. Body: { letter, title }
+ */
+app.post('/api/options/:nodeId', async (req, res) => {
+  try {
+    const { letter, title } = req.body;
+    if (!letter || !title) {
+      return res.status(400).json({ error: 'letter and title are required' });
+    }
+
+    const userId = 1; // TODO: real auth
+    const option = await addCustomOption(
+      req.params.nodeId, DEFAULT_PROJECT_ID,
+      letter.toUpperCase(), title, userId
+    );
+    res.status(201).json(option);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/db-health
+ * Check database connectivity.
+ */
+app.get('/api/db-health', async (_req, res) => {
+  const ok = await checkDb();
+  res.json({ db: ok ? 'ok' : 'error' });
+});
+
 // ─── Static frontend (production) ─────────────────────────
 
 const distDir = path.resolve(__dirname, '..', 'dist');
@@ -183,4 +343,8 @@ app.listen(PORT, () => {
   }
 
   console.log(`Decisions directory: ${activeDecisionsDir()}`);
+
+  checkDb().then(ok => {
+    console.log(`Database: ${ok ? 'connected' : 'NOT CONNECTED (comments/votes disabled)'}`);
+  });
 });
