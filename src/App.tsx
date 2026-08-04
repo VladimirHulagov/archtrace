@@ -11,6 +11,7 @@ import {
 import { calculateLayout } from './SimpleTree/utils/positions';
 import type { Point } from './SimpleTree/types';
 import ReactMarkdown from 'react-markdown';
+import { DetailPanel } from './DetailPanel';
 
 const STATUS_ICONS: Record<string, string> = {
   accepted: '✅', rejected: '❌', proposed: '💡', debating: '🔥', superseded: '⏭️',
@@ -239,117 +240,16 @@ function App() {
 
       {/* Detail Panel */}
       {selectedDetail && (
-        <div style={{
-          width: '400px', height: '100vh', overflowY: 'auto',
-          borderLeft: '1px solid #e0e0e0', padding: '20px',
-          background: '#fafafa', flexShrink: 0, touchAction: 'pan-y',
-        }}
-        onTouchStart={(e) => { swipeStartX.current = e.touches[0].clientX; }}
-        onTouchEnd={(e) => {
-          if (swipeStartX.current !== null) {
-            const dx = e.changedTouches[0].clientX - swipeStartX.current;
-            if (dx > 50) setSelectedDetail(null);
-            swipeStartX.current = null;
-          }
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h2 style={{ margin: 0, fontSize: '18px' }}>{STATUS_ICONS[selectedDetail.status] || '📄'} ADR-{selectedDetail.id}</h2>
-            <button onClick={() => setSelectedDetail(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '20px', color: '#999' }}>×</button>
-          </div>
-          <h3 style={{ marginTop: 0 }}>{selectedDetail.title}</h3>
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
-            <span style={{ padding: '2px 8px', borderRadius: '4px', background: statusColor(selectedDetail.status), fontSize: '12px', color: '#fff' }}>{selectedDetail.status}</span>
-            <span style={{ padding: '2px 8px', borderRadius: '4px', background: '#e0e0e0', fontSize: '12px' }}>{selectedDetail.type}</span>
-            <span style={{ padding: '2px 8px', borderRadius: '4px', background: '#e0e0e0', fontSize: '12px' }}>{selectedDetail.created}</span>
-          </div>
-
-          {/* Interactive Voting */}
-          <div style={{ marginBottom: '16px' }}>
-            <h4 style={{ marginBottom: '8px', fontSize: '14px' }}>Vote</h4>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-              {allOptions.map(opt => {
-                const isVoted = userVote?.option_letter === opt.letter;
-                const w = voteTally[opt.letter] || 0;
-                return (
-                  <button key={opt.letter} onClick={() => handleCastVote(opt.letter)} style={{
-                    padding: '4px 10px', borderRadius: '4px', cursor: 'pointer',
-                    border: `2px solid ${isVoted ? (VOTE_COLORS[opt.letter] || '#1890ff') : '#d0d0d0'}`,
-                    background: isVoted ? (VOTE_COLORS[opt.letter] || '#1890ff') : '#fff',
-                    color: isVoted ? '#fff' : '#333', fontSize: '12px', fontWeight: 'bold',
-                  }} title={opt.title}>{opt.letter} ({w})</button>
-                );
-              })}
-              {userVote && (
-                <button onClick={handleRemoveVote} style={{
-                  padding: '4px 8px', borderRadius: '4px', cursor: 'pointer',
-                  border: '1px solid #ffccc7', background: '#fff2f0', color: '#ff4d4f', fontSize: '11px',
-                }}>✕ Remove</button>
-              )}
-            </div>
-            {/* Add custom option */}
-            {showAddOption ? (
-              <div style={{ marginBottom: '8px', padding: '8px', background: '#f5f5f5', borderRadius: '4px' }}>
-                <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
-                  <input type="text" placeholder="Letter" value={newOptionLetter} onChange={e => setNewOptionLetter(e.target.value)} style={{ width: '60px', padding: '4px', border: '1px solid #d0d0d0', borderRadius: '3px', fontSize: '13px' }} />
-                  <input type="text" placeholder="Title..." value={newOptionTitle} onChange={e => setNewOptionTitle(e.target.value)} style={{ flex: 1, padding: '4px', border: '1px solid #d0d0d0', borderRadius: '3px', fontSize: '13px' }} />
-                </div>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <button onClick={handleAddOption} style={{ padding: '4px 10px', background: '#1890ff', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '12px' }}>Add</button>
-                  <button onClick={() => setShowAddOption(false)} style={{ padding: '4px 10px', background: '#f0f0f0', border: '1px solid #d0d0d0', borderRadius: '3px', cursor: 'pointer', fontSize: '12px' }}>Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <button onClick={() => setShowAddOption(true)} style={{ padding: '2px 8px', fontSize: '11px', border: '1px dashed #bbb', background: 'transparent', borderRadius: '3px', cursor: 'pointer', color: '#666', marginBottom: '8px' }}>+ Add option</button>
-            )}
-            {/* Vote table */}
-            {sortedTally.length > 0 && (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                <thead><tr style={{ borderBottom: '2px solid #e0e0e0' }}>
-                  <th style={{ textAlign: 'left', padding: '4px' }}>Opt</th>
-                  <th style={{ textAlign: 'right', padding: '4px' }}>Weight</th>
-                  <th style={{ textAlign: 'left', padding: '4px' }}>Voters</th>
-                </tr></thead>
-                <tbody>
-                  {sortedTally.map(([opt, w]) => (
-                    <tr key={opt} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                      <td style={{ padding: '4px', fontWeight: 'bold', color: VOTE_COLORS[opt] || '#333' }}>{opt}</td>
-                      <td style={{ padding: '4px', textAlign: 'right' }}>{w}</td>
-                      <td style={{ padding: '4px', color: '#666', fontSize: '12px' }}>{votes.filter(v => v.option_letter === opt).map(v => v.username || '?').join(', ')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-
-          {/* Comments */}
-          <div style={{ marginBottom: '16px' }}>
-            <h4 style={{ marginBottom: '8px', fontSize: '14px' }}>Comments ({comments.length})</h4>
-            {comments.map(c => (
-              <div key={c.id} style={{ marginBottom: '8px', padding: '8px', background: '#fff', borderRadius: '4px', border: '1px solid #e8e8e8', marginLeft: c.parent_comment_id ? '20px' : '0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                  <span style={{ fontWeight: 'bold', fontSize: '12px' }}>{c.author_name || 'Unknown'}</span>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <span style={{ fontSize: '11px', color: '#999' }}>{new Date(c.created_at).toLocaleDateString('en', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
-                    <button onClick={() => handleDeleteComment(c.id)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ff4d4f', fontSize: '14px' }} title="Delete">×</button>
-                  </div>
-                </div>
-                <div style={{ fontSize: '13px', color: '#333', lineHeight: 1.4 }}>{c.content}</div>
-              </div>
-            ))}
-            {/* Comment input */}
-            <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
-              <input type="text" placeholder="Write a comment..." value={commentText} onChange={e => setCommentText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handlePostComment(); }} style={{ flex: 1, padding: '6px 10px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px' }} />
-              <button onClick={handlePostComment} disabled={!commentText.trim()} style={{ padding: '6px 14px', borderRadius: '4px', border: 'none', background: commentText.trim() ? '#1890ff' : '#d0d0d0', color: '#fff', cursor: commentText.trim() ? 'pointer' : 'not-allowed', fontSize: '13px' }}>Send</button>
-            </div>
-          </div>
-
-          {/* Markdown body */}
-          <div style={{ fontSize: '14px', lineHeight: '1.6', color: '#333' }}>
-            <ReactMarkdown>{selectedDetail.body}</ReactMarkdown>
-          </div>
-          <div style={{ marginTop: '20px', paddingTop: '12px', borderTop: '1px solid #e0e0e0', fontSize: '12px', color: '#999' }}>Source: {selectedDetail.file}</div>
-        </div>
+        <DetailPanel
+          detail={selectedDetail}
+          comments={comments}
+          votes={votes}
+          customOptions={customOptions}
+          onCommentsChange={setComments}
+          onVotesChange={setVotes}
+          onCustomOptionsChange={setCustomOptions}
+          onClose={() => setSelectedDetail(null)}
+        />
       )}
     </div>
   );

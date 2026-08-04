@@ -1,6 +1,6 @@
 ---
 id: "002"
-title: "Form factor: Open Rack V3 (21-inch) vs standard 19-inch"
+title: "Форм-фактор: Open Rack V3 (21 дюйм) vs стандартный 19 дюйм"
 status: accepted
 type: decision
 parent: "001"
@@ -12,47 +12,48 @@ voters:
     role: architect
     vote: "A"
     weight: 3
-    rationale: "OCP compliance requires 21-inch. No point in half-measures"
+    rationale: "Требование OCP — 21 дюйм. Нет смысла в полумерах"
   - name: Anna
     role: senior
     vote: "A"
     weight: 2
-    rationale: "21-inch gives better airflow and component density"
+    rationale: "21 дюйм даёт лучший воздушный поток и плотность компонентов"
   - name: Dmitri
     role: developer
     vote: "A"
     weight: 1
-    rationale: "More PCB real estate for layout"
+    rationale: "Больше места на PCB для разводки"
 ---
 
-## Context
+## Контекст
 
-ADR-001 requires OCP compliance. The Open Rack V3 standard defines a 21-inch
-internal width (537mm) vs the traditional 19-inch (482mm) EIA-310 standard.
+ADR-001 требует соответствия стандарту OCP. Стандарт Open Rack V3 определяет
+внутреннюю ширину 21 дюйм (537 мм) против традиционного стандарта EIA-310
+(19 дюймов / 482 мм).
 
-OpenU (OU) = 48mm vertical pitch (slightly taller than standard 1U = 44.45mm).
+OpenU (OU) = вертикальный шаг 48 мм (немного выше стандартного 1U = 44,45 мм).
 
-## Options
+## Опции
 
-### Option A: Open Rack V3 (21-inch, OU)
+### Option A: Open Rack V3 (21 дюйм, OU)
 
-- Pros: OCP compliant, wider PCB space, better airflow, higher density
-- Cons: Non-standard tooling, new chassis suppliers, limited legacy rack compat
+- Плюсы: соответствует OCP, шире PCB, лучший воздушный поток, выше плотность
+- Минусы: нестандартная оснастка, новые поставщики шасси, ограниченная совместимость со старыми стойками
 
-### Option B: 19-inch EIA-310
+### Option B: 19 дюймов EIA-310
 
-- Pros: Widely available, existing supply chain, proven mechanical design
-- Cons: NOT OCP compliant, narrower, worse thermals, rejects requirement
+- Плюсы: широкодоступно, существующая цепочка поставок, проверенная механика
+- Минусы: НЕ соответствует OCP, уже, хуже терможарактеристики, нарушает требование
 
-## Decision
+## Решение
 
-**Option A: Open Rack V3 (21-inch, OU).**
+**Вариант A: Open Rack V3 (21 дюйм, OU).**
 
-Unanimous. OCP compliance is a hard requirement.
+Единогласное решение. Соответствие OCP — жёсткое требование.
 
-## Consequences
+## Последствия
 
-- Chassis partners must have 21-inch tooling
-- PCB width up to 537mm
-- Vertical mounting pitch = 48mm OU
-- Need Open Rack V3 bus bar connector (with power sense line)
+- Партнёры по шасси должны иметь оснастку для 21 дюйма
+- Ширина PCB до 537 мм
+- Вертикальный шаг mounting = 48 мм OU
+- Требуется коннектор шины питания Open Rack V3 (с линией измерения)
