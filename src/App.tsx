@@ -53,6 +53,9 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [showProjectMenu, setShowProjectMenu] = useState(false);
+  const [currentUser, setCurrentUser] = useState<{ id: number; username: string; role: string } | null>(null);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [users, setUsers] = useState<{ id: number; username: string; role: string }[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<SyncResult | null>(null);
   const [showSyncBanner, setShowSyncBanner] = useState(false);
@@ -197,6 +200,7 @@ function App() {
 
   useEffect(() => {
     fetchProjects().then(setProjects).catch(() => {});
+    fetch('/api/users').then(r => r.json()).then(setUsers).catch(() => {});
     fetchGraph().then((graph: Graph) => {
       const treeNodes = graph.nodes.map(decisionToTreeNode);
       const treeConnections = graph.connections.map(c => ({ id: c.id, from: c.from, to: c.to, kind: c.kind }));
@@ -281,6 +285,45 @@ function App() {
         )}
       </div>
 
+      {/* User selector — left, below project selector */}
+      <div style={{ position: 'fixed', top: '48px', left: '16px', zIndex: 1000 }}>
+        <button
+          onClick={() => setShowUserMenu(!showUserMenu)}
+          style={{
+            border: '1px solid #d0d0d0', background: '#fff', borderRadius: '4px',
+            padding: '6px 14px', cursor: 'pointer', fontSize: '13px', color: '#333',
+            display: 'flex', alignItems: 'center', gap: '6px',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+          }}
+        >
+          👤 {currentUser ? currentUser.username : 'Гость'} ▾
+        </button>
+        {showUserMenu && (
+          <div style={{
+            position: 'absolute', top: '100%', left: 0, marginTop: '4px',
+            background: '#fff', border: '1px solid #e0e0e0', borderRadius: '4px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)', minWidth: '200px', overflow: 'hidden',
+          }}>
+            {users.map(u => (
+              <div key={u.id} onClick={() => {
+                setCurrentUser(u);
+                setShowUserMenu(false);
+              }} style={{
+                padding: '8px 14px', cursor: 'pointer',
+                borderBottom: '1px solid #f0f0f0',
+                background: currentUser?.id === u.id ? '#e6f7ff' : '#fff',
+                fontSize: '12px',
+              }}>
+                <span style={{ fontWeight: 'bold' }}>{u.username}</span>
+                <span style={{ marginLeft: '8px', fontSize: '10px', color: '#999' }}>
+                  {u.role === 'architect' ? '🏗 (×3)' : u.role === 'senior' ? '⚙️ (×2)' : '👤 (×1)'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Tree */}
       <div style={{ flex: 1, position: 'relative' }}>
         <Tree
@@ -301,6 +344,8 @@ function App() {
           comments={comments}
           votes={votes}
           customOptions={customOptions}
+          currentUserId={currentUser?.id || 1}
+          currentRole={currentUser?.role || 'developer'}
           onCommentsChange={setComments}
           onVotesChange={setVotes}
           onCustomOptionsChange={setCustomOptions}

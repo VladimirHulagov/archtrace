@@ -299,6 +299,20 @@ export async function getReactionsForComments(commentIds: number[], userId: numb
   return result;
 }
 
+// ─── Custom Options Update ───────────────────────────────
+
+export async function updateCustomOption(
+  nodeId: string, projectId: number, letter: string, newTitle: string
+): Promise<CustomOption | null> {
+  const rows = await query(
+    `UPDATE custom_options SET title = $4
+     WHERE node_id = $1 AND project_id = $2 AND letter = $3
+     RETURNING *`,
+    [nodeId, projectId, letter, newTitle]
+  );
+  return rows[0] || null;
+}
+
 // ─── Users API ───────────────────────────────────────────
 
 export async function getOrCreateUser(githubId: number, username: string, name: string | null, avatarUrl: string | null): Promise<User> {

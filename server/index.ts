@@ -20,9 +20,11 @@ import {
   getComments, addComment, deleteComment,
   getVotes, castVote, removeVote,
   toggleReaction,
+  updateCustomOption,
   getCustomOptions, addCustomOption,
   getOrCreateUser, getUserById, getProjects,
   checkDb,
+  query,
 } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -252,8 +254,7 @@ app.post('/api/comments/:nodeId', async (req, res) => {
       return res.status(400).json({ error: 'Content is required' });
     }
 
-    // TODO: Replace with real auth. For now use default admin user (id=1).
-    const userId = 1;
+    const userId = req.body.userId || 1;
 
     const comment = await addComment(
       req.params.nodeId, getProjectId(req), userId, content.trim(), parentCommentId || null
@@ -271,7 +272,7 @@ app.post('/api/comments/:nodeId', async (req, res) => {
 app.delete('/api/comments/:commentId', async (req, res) => {
   try {
     const commentId = parseInt(req.params.commentId, 10);
-    const userId = 1; // TODO: real auth
+    const userId = parseInt(req.query.userId as string) || 1;
     const deleted = await deleteComment(commentId, userId);
     if (!deleted) return res.status(404).json({ error: 'Comment not found or not owned' });
     res.status(204).end();
@@ -304,12 +305,11 @@ app.post('/api/votes/:nodeId', async (req, res) => {
       return res.status(400).json({ error: 'optionLetter is required' });
     }
 
-    const userId = 1; // TODO: real auth
-    const userWeight = weight || 1;
+    const userId = req.body.userId || 1;
 
     const vote = await castVote(
       req.params.nodeId, getProjectId(req), userId,
-      optionLetter, userWeight, rationale || null
+      optionLetter, weight || 1, rationale || null
     );
     res.status(201).json(vote);
   } catch (err: any) {
@@ -323,7 +323,7 @@ app.post('/api/votes/:nodeId', async (req, res) => {
  */
 app.delete('/api/votes/:nodeId', async (req, res) => {
   try {
-    const userId = 1; // TODO: real auth
+    const userId = parseInt(req.query.userId as string) || req.body?.userId || 1;
     const removed = await removeVote(req.params.nodeId, getProjectId(req), userId);
     if (!removed) return res.status(404).json({ error: 'Vote not found' });
     res.status(204).end();
@@ -356,7 +356,7 @@ app.post('/api/options/:nodeId', async (req, res) => {
       return res.status(400).json({ error: 'letter and title are required' });
     }
 
-    const userId = 1; // TODO: real auth
+    const userId = req.body.userId || 1;
     const option = await addCustomOption(
       req.params.nodeId, getProjectId(req),
       letter.toUpperCase(), title, userId
@@ -385,6 +385,38 @@ app.get('/api/projects', async (_req, res) => {
   }
 });
 
+
+/**
+ * PUT /api/options/:nodeId/:letter
+ * Update custom option title. Body: { title }
+ */
+app.put('/api/options/:nodeId/:letter', async (req, res) => {
+  try {
+    const { title } = req.body;
+    if (!title) return res.status(400).json({ error: 'title required' });
+    const result = await updateCustomOption(
+      req.params.nodeId, getProjectId(req), req.params.letter.toUpperCase(), title.trim()
+    );
+    if (!result) return res.status(404).json({ error: 'Option not found' });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/users
+ * List all users (for role switching UI).
+ */
+app.get('/api/users', async (_req, res) => {
+  try {
+    const users = await query('SELECT id, username, role FROM users ORDER BY id');
+    res.json(users);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/db-health', async (_req, res) => {
   const ok = await checkDb();
   res.json({ db: ok ? 'ok' : 'error' });
@@ -402,7 +434,7 @@ app.post('/api/comments/:commentId/react', async (req, res) => {
     if (reaction !== 'like' && reaction !== 'dislike') {
       return res.status(400).json({ error: 'reaction must be like or dislike' });
     }
-    const userId = 1; // TODO: real auth
+    const userId = req.body.userId || 1;
     const result = await toggleReaction(commentId, userId, reaction);
     res.json(result);
   } catch (err: any) {

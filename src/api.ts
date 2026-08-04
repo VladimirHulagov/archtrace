@@ -97,11 +97,11 @@ export async function fetchComments(nodeId: string): Promise<Comment[]> {
   return res.json();
 }
 
-export async function postComment(nodeId: string, content: string, parentCommentId?: number): Promise<Comment> {
+export async function postComment(nodeId: string, content: string, parentCommentId?: number, userId?: number): Promise<Comment> {
   const res = await fetch(`${API_BASE}/comments/${nodeId}`, {
     method: 'POST',
     headers: jsonHeaders(),
-    body: JSON.stringify({ content, parentCommentId }),
+    body: JSON.stringify({ content, parentCommentId, userId }),
   });
   if (!res.ok) throw new Error('Failed to post comment');
   return res.json();
@@ -111,13 +111,23 @@ export async function deleteCommentApi(commentId: number): Promise<void> {
   await fetch(`${API_BASE}/comments/${commentId}`, { method: 'DELETE', headers: projectHeaders() });
 }
 
-export async function reactToComment(commentId: number, reaction: 'like' | 'dislike'): Promise<{ likes: number; dislikes: number; userReaction: string | null }> {
+export async function reactToComment(commentId: number, reaction: 'like' | 'dislike', userId?: number): Promise<{ likes: number; dislikes: number; userReaction: string | null }> {
   const res = await fetch(`${API_BASE}/comments/${commentId}/react`, {
     method: 'POST',
     headers: jsonHeaders(),
-    body: JSON.stringify({ reaction }),
+    body: JSON.stringify({ reaction, userId }),
   });
   if (!res.ok) throw new Error('Failed to react');
+  return res.json();
+}
+
+export async function updateCustomOptionApi(nodeId: string, letter: string, title: string): Promise<CustomOption> {
+  const res = await fetch(`${API_BASE}/options/${nodeId}/${letter}`, {
+    method: 'PUT',
+    headers: jsonHeaders(),
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new Error('Failed to update option');
   return res.json();
 }
 
@@ -127,18 +137,19 @@ export async function fetchVotes(nodeId: string): Promise<Vote[]> {
   return res.json();
 }
 
-export async function castVoteApi(nodeId: string, optionLetter: string, weight: number, rationale?: string): Promise<Vote> {
+export async function castVoteApi(nodeId: string, optionLetter: string, weight: number, rationale?: string, userId?: number): Promise<Vote> {
   const res = await fetch(`${API_BASE}/votes/${nodeId}`, {
     method: 'POST',
     headers: jsonHeaders(),
-    body: JSON.stringify({ optionLetter, weight, rationale }),
+    body: JSON.stringify({ optionLetter, weight, rationale, userId }),
   });
   if (!res.ok) throw new Error('Failed to cast vote');
   return res.json();
 }
 
-export async function removeVoteApi(nodeId: string): Promise<void> {
-  await fetch(`${API_BASE}/votes/${nodeId}`, { method: 'DELETE', headers: projectHeaders() });
+export async function removeVoteApi(nodeId: string, userId?: number): Promise<void> {
+  const url = userId ? `${API_BASE}/votes/${nodeId}?userId=${userId}` : `${API_BASE}/votes/${nodeId}`;
+  await fetch(url, { method: 'DELETE', headers: projectHeaders() });
 }
 
 export async function fetchCustomOptions(nodeId: string): Promise<CustomOption[]> {

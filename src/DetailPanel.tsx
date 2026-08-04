@@ -7,7 +7,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { DecisionNode, Comment, Vote, CustomOption } from './api';
 import {
-  postComment, deleteCommentApi, castVoteApi, removeVoteApi, addCustomOptionApi,
+  postComment, deleteCommentApi, castVoteApi, removeVoteApi, addCustomOptionApi, updateCustomOptionApi,
   reactToComment,
 } from './api';
 
@@ -33,6 +33,8 @@ export interface DetailPanelProps {
   comments: Comment[];
   votes: Vote[];
   customOptions: CustomOption[];
+  currentUserId: number;
+  currentRole: string;
   onCommentsChange: (c: Comment[]) => void;
   onVotesChange: (v: Vote[]) => void;
   onCustomOptionsChange: (o: CustomOption[]) => void;
@@ -41,6 +43,7 @@ export interface DetailPanelProps {
 
 export const DetailPanel: React.FC<DetailPanelProps> = ({
   detail, comments, votes, customOptions,
+  currentUserId, currentRole,
   onCommentsChange, onVotesChange, onCustomOptionsChange, onClose,
 }) => {
   const [mode, setMode] = useState<PanelMode>('sidebar');
@@ -54,6 +57,8 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const [contextVersions, setContextVersions] = useState<string[]>([]);
   const [showContextHistory, setShowContextHistory] = useState(false);
   const [commentSort, setCommentSort] = useState<CommentSort>('date');
+  const [editingOptionLetter, setEditingOptionLetter] = useState<string | null>(null);
+  const [editingOptionTitle, setEditingOptionTitle] = useState('');
 
   // ─── Resize logic ───────────────────────────────────────
   const isResizing = useRef(false);
@@ -88,7 +93,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     ...customOptions.map(o => ({ letter: o.letter, title: o.title })),
   ], [detail.options, customOptions]);
 
-  const userVote = votes.find(v => v.user_id === 1);
+  const userVote = votes.find(v => v.user_id === currentUserId);
   const voteTally: Record<string, number> = {};
   for (const v of votes) { voteTally[v.option_letter] = (voteTally[v.option_letter] || 0) + v.weight; }
   const sortedTally = Object.entries(voteTally).sort(([, a], [, b]) => b - a);
@@ -109,8 +114,8 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const handleVote = useCallback(async () => {
     if (!selectedOption) return;
     try {
-      const w = 3;
-      const v = await castVoteApi(detail.id, selectedOption, w);
+      const w = currentRole === 'architect' ? 3 : currentRole === 'senior' ? 2 : 1;
+      const v = await castVoteApi(detail.id, selectedOption, w, undefined, currentUserId);
       onVotesChange([...votes.filter(x => x.user_id !== v.user_id), v]);
       setSelectedOption(null);
     } catch (err) { console.error('Vote error:', err); }
@@ -118,15 +123,15 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
   const handleRemoveVote = useCallback(async () => {
     try {
-      await removeVoteApi(detail.id);
-      onVotesChange(votes.filter(v => v.user_id !== 1));
+      await removeVoteApi(detail.id, currentUserId);
+      onVotesChange(votes.filter(v => v.user_id !== currentUserId));
     } catch (err) { console.error('Remove vote error:', err); }
   }, [detail, votes, onVotesChange]);
 
   const handlePostComment = useCallback(async () => {
     if (!commentText.trim()) return;
     try {
-      const c = await postComment(detail.id, commentText.trim());
+      const c = await postComment(detail.id, commentText.trim(), undefined, currentUserId);
       onCommentsChange([...comments, c]);
       setCommentText('');
     } catch (err) { console.error('Comment error:', err); }
@@ -139,7 +144,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
   const handleReact = useCallback(async (commentId: number, reaction: 'like' | 'dislike') => {
     try {
-      const result = await reactToComment(commentId, reaction);
+      const result = await reactToComment(commentId, reaction, currentUserId);
       onCommentsChange(comments.map(c =>
         c.id === commentId
           ? { ...c, likes: result.likes, dislikes: result.dislikes, user_reaction: result.userReaction }
@@ -164,6 +169,15 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
       setNewOptionTitle(''); setShowAddOption(false);
     } catch (err) { console.error('Add option error:', err); }
   }, [newOptionTitle, detail, customOptions, onCustomOptionsChange, allOptions]);
+
+  const handleUpdateOption = useCallback(async (letter: string) => {
+    if (!editingOptionTitle.trim()) { setEditingOptionLetter(null); return; }
+    try {
+      const updated = await updateCustomOptionApi(detail.id, letter, editingOptionTitle.trim());
+      onCustomOptionsChange(customOptions.map(o => o.letter === letter ? updated : o));
+    } catch (err) { console.error('Update option error:', err); }
+    setEditingOptionLetter(null); setEditingOptionTitle('');
+  }, [editingOptionTitle, detail, customOptions, onCustomOptionsChange]);
 
   const handleSaveContext = useCallback(() => {
     const nv = [...contextVersions, editingContext];
@@ -290,14 +304,34 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 const w = voteTally[opt.letter] || 0;
                 const color = VOTE_COLORS[opt.letter] || '#8c8c8c';
                 return (
-                  <div key={opt.letter} onClick={() => setSelectedOption(isSel ? null : opt.letter)} style={{
-                    display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px',
-                    borderRadius: '4px', cursor: 'pointer',
-                    border: `2px solid ${isSel ? color : isVoted ? color + '88' : '#e0e0e0'}`,
-                    background: isSel ? color + '15' : isVoted ? color + '08' : '#fff',
-                  }}>
+                  <div key={opt.letter}
+                      onClick={() => setSelectedOption(isSel ? null : opt.letter)}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        const isCustom = customOptions.some(co => co.letter === opt.letter);
+                        if (isCustom) { setEditingOptionLetter(opt.letter); setEditingOptionTitle(opt.title); }
+                      }}
+                      title="Двойной клик — редактировать"
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px',
+                        borderRadius: '4px', cursor: 'pointer',
+                        border: `2px solid ${isSel ? color : isVoted ? color + '88' : '#e0e0e0'}`,
+                        background: isSel ? color + '15' : isVoted ? color + '08' : '#fff',
+                      }}>
                     <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '24px', height: '24px', borderRadius: '4px', background: color, color: '#fff', fontWeight: 'bold', fontSize: '13px' }}>{opt.letter}</span>
-                    <span style={{ flex: 1, fontSize: '13px', color: '#333' }}>{opt.title}</span>
+                    {editingOptionLetter === opt.letter ? (
+                      <input type="text" value={editingOptionTitle}
+                        onChange={e => setEditingOptionTitle(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); handleUpdateOption(opt.letter); }
+                          if (e.key === 'Escape') { setEditingOptionLetter(null); }
+                        }}
+                        onBlur={() => handleUpdateOption(opt.letter)}
+                        autoFocus
+                        style={{ flex: 1, padding: '3px 6px', border: '1px solid #1890ff', borderRadius: '3px', fontSize: '13px' }} />
+                    ) : (
+                      <span style={{ flex: 1, fontSize: '13px', color: '#333' }}>{opt.title}</span>
+                    )}
                     {w > 0 && <span style={{ padding: '2px 8px', borderRadius: '10px', background: color + '20', color, fontSize: '11px', fontWeight: 'bold' }}>{w}</span>}
                     {isVoted && <span style={{ fontSize: '14px' }}>✅</span>}
                   </div>
