@@ -4,23 +4,23 @@ services:
     container_name: archtrace
     restart: unless-stopped
     volumes:
-      # Source — bind-mounted so host edits trigger HMR (frontend) and
-      # tsx watch (Express) without rebuilding/restarting the container.
+      # Source — bind-mounted so host edits trigger HMR
       - ./src:/app/src
       - ./server:/app/server
       - ./cli:/app/cli
       - ./decisions:/app/decisions
-      # Vite / TS entrypoints and config (live-edited).
       - ./index.html:/app/index.html
       - ./vite.config.ts:/app/vite.config.ts
       - ./vitest.config.ts:/app/vitest.config.ts
       - ./tsconfig.json:/app/tsconfig.json
       - ./tsconfig.node.json:/app/tsconfig.node.json
-      # NOTE: node_modules intentionally NOT mounted — comes from the image
-      # (avoids host/container platform mismatch; rebuild to change deps).
+      # Persistent git-data clone (survives container restarts)
+      - archtrace-git-data:/app/git-data
+      # Config file (persisted)
+      - archtrace-config:/app/archtrace-config
     environment:
-      - CHOKIDAR_USEPOLLING=true   # reliable FS events across the bind mount
-      - PORT=3001                  # Express; Vite proxies /api -> http://localhost:3001
+      - CHOKIDAR_USEPOLLING=true
+      - PORT=3001
     labels:
       docker-guard.allow: "true"
       traefik.enable: "true"
@@ -30,6 +30,10 @@ services:
       traefik.http.services.archtrace.loadbalancer.server.port: "5233"
     networks:
       - traefik-public
+
+volumes:
+  archtrace-git-data:
+  archtrace-config:
 
 networks:
   traefik-public:

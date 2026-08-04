@@ -33,6 +33,22 @@ export interface Graph {
   connections: GraphConnection[];
 }
 
+export interface SyncResult {
+  success: boolean;
+  action: 'clone' | 'pull' | 'none';
+  message: string;
+  commitHash?: string;
+  timestamp: string;
+}
+
+export interface SyncStatus {
+  ready: boolean;
+  repoUrl: string;
+  branch: string;
+  decisionsDir: string | null;
+  localFallback: boolean;
+}
+
 const API_BASE = '/api';
 
 export async function fetchGraph(): Promise<Graph> {
@@ -44,5 +60,17 @@ export async function fetchGraph(): Promise<Graph> {
 export async function fetchDecision(id: string): Promise<DecisionNode & { voteTally: Record<string, number> }> {
   const res = await fetch(`${API_BASE}/decisions/${id}`);
   if (!res.ok) throw new Error(`Failed to fetch decision: ${res.statusText}`);
+  return res.json();
+}
+
+export async function syncRepo(): Promise<SyncResult> {
+  const res = await fetch(`${API_BASE}/sync`, { method: 'POST' });
+  if (!res.ok) throw new Error(`Sync failed: ${res.statusText}`);
+  return res.json();
+}
+
+export async function getSyncStatus(): Promise<SyncStatus> {
+  const res = await fetch(`${API_BASE}/sync/status`);
+  if (!res.ok) throw new Error(`Status check failed: ${res.statusText}`);
   return res.json();
 }

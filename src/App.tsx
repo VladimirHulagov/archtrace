@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Tree, TreeNode } from './SimpleTree';
-import { fetchGraph, type Graph, type DecisionNode } from './api';
+import { fetchGraph, syncRepo, getSyncStatus, type Graph, type DecisionNode, type SyncResult } from './api';
 import { calculateLayout } from './SimpleTree/utils/positions';
 import type { Point } from './SimpleTree/types';
 import ReactMarkdown from 'react-markdown';
@@ -85,6 +85,9 @@ function App() {
   const connectionIdCounter = useRef(1000);
   const swipeStartX = useRef<number | null>(null);
   const [edgePoints, setEdgePoints] = useState<Map<string, Point[]>>(new Map());
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<SyncResult | null>(null);
+  const [showSyncBanner, setShowSyncBanner] = useState(false);
 
   // ─── Fetch graph on mount ──────────────────────────────
 
@@ -109,6 +112,36 @@ function App() {
         setError(err.message);
         setLoading(false);
       });
+  }, []);
+
+  // ─── Sync handler ──────────────────────────────────────
+
+  const handleSync = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const result = await syncRepo();
+      setLastSync(result);
+      setShowSyncBanner(true);
+      // Reload graph after sync
+      const graph = await fetchGraph();
+      const treeNodes = graph.nodes.map(decisionToTreeNode);
+      const treeConnections = graph.connections.map(c => ({
+        id: c.id, from: c.from, to: c.to, kind: c.kind,
+      }));
+      const containerWidth = window.innerWidth;
+      const { nodes: positioned, edgePoints: ePoints } = calculateLayout(treeNodes, treeConnections, containerWidth);
+      setNodes(positioned);
+      setConnections(treeConnections);
+      setEdgePoints(ePoints);
+      // Hide banner after 5 seconds
+      setTimeout(() => setShowSyncBanner(false), 5000);
+    } catch (err: any) {
+      setLastSync({ success: false, action: 'none', message: err.message, timestamp: new Date().toISOString() });
+      setShowSyncBanner(true);
+      setTimeout(() => setShowSyncBanner(false), 5000);
+    } finally {
+      setSyncing(false);
+    }
   }, []);
 
   // ─── Handlers (local-only mutations for now) ────────────
@@ -200,7 +233,36 @@ function App() {
   }
 
   return (
-    <div style={{ width: '100vw', height: '100vh', display: 'flex' }}>
+    <div style={{ width: '100vw', height: '100vh', display: 'flex', position: 'relative' }}>
+      {/* Sync button */}
+      <button
+        onClick={handleSync}
+        disabled={syncing}
+        style={{
+          position: 'fixed', top: '12px', right: '12px', zIndex: 1000,
+          padding: '6px 14px', borderRadius: '6px', border: '1px solid #d0d0d0',
+          background: syncing ? '#f0f0f0' : '#fff', cursor: syncing ? 'wait' : 'pointer',
+          fontSize: '13px', color: '#333', display: 'flex', alignItems: 'center', gap: '6px',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+        }}
+        title="Pull latest from Git repository"
+      >
+        {syncing ? '⟳ Syncing...' : '⇅ Sync'}
+      </button>
+
+      {/* Sync result banner */}
+      {showSyncBanner && lastSync && (
+        <div style={{
+          position: 'fixed', top: '48px', right: '12px', zIndex: 1000,
+          padding: '8px 14px', borderRadius: '6px', maxWidth: '360px',
+          background: lastSync.success ? '#f6ffed' : '#fff2f0',
+          border: `1px solid ${lastSync.success ? '#b7eb8f' : '#ffccc7'}`,
+          fontSize: '12px', color: '#333',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+        }}>
+          {lastSync.success ? '✅' : '❌'} {lastSync.message}
+        </div>
+      )}
       {/* ─── Tree View ──────────────────────────────────── */}
       <div style={{ flex: 1, position: 'relative' }}>
         <Tree
