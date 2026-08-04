@@ -1,41 +1,45 @@
 ---
 id: "008"
-title: "Battery Backup Unit: OCP V3 BBU vs UPS-only"
-status: proposed
+title: "Батарейный блок: OCP V3 BBU vs только ИБП"
+status: accepted
 type: decision
 parent: "003"
 cross_refs: ["007"]
-created: 2026-07-23
-decided: null
-voters: []
+created: 2026-07-21
+decided: 2026-07-22
+voters:
+  - name: Ivan
+    role: architect
+    vote: "A"
+    weight: 3
+    rationale: "BBU в стойке реагирует быстрее центрального ИБП"
 ---
 
-## Context
+## Контекст
 
-Open Rack V3 BBU specification defines rack-level battery backup modules
-that slot into the power shelf, providing ride-through during power
-transitions or grid failures.
+При провале питания нужен буфер для переключения на генератор или
+для корректного завершения работы.
 
-## Options
+## Опции
 
-### Option A: OCP V3 BBU modules (rack-level)
+### Option A: OCP V3 BBU (батарейный блок в стойке)
 
-Battery modules in the power shelf. ~90 seconds ride-through.
+- Плюсы: мгновенное переключение, OCP-совместимость, локальный буфер
+- Минусы: дополнительные компоненты, обслуживание батарей
 
-- Pros: Standardized, hot-swappable, sufficient for generator switchover
-- Cons: Additional cost, battery lifecycle maintenance
+### Option B: Только центральный ИБП
 
-### Option B: Facility UPS only
+- Плюсы: проще архитектура стойки, меньше компонентов
+- Минусы: задержка переключения ИБП, риск для данных
 
-Rely entirely on datacenter UPS for power continuity.
+## Решение
 
-- Pros: Zero rack-level battery cost
-- Cons: No rack-level ride-through, single point of facility dependency
+**Вариант A: OCP V3 BBU.**
 
-## Decision
+Локальный буфер критичен для бесшовного переключения.
 
-Under discussion. No votes yet.
+## Последствия
 
-## Consequences
-
-To be determined based on deployment datacenter UPS classification.
+- Слот BBU в power shelf
+- Контроль заряда и состояния через BMC
+- Замена батарей по расписанию

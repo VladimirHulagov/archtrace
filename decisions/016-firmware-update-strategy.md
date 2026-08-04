@@ -1,33 +1,54 @@
 ---
 id: "016"
-title: "Firmware update: Redfish OEM vs OpenBMC native vs dual-path"
-status: proposed
-type: task
+title: "Стратегия обновления прошивок: Redfish OEM vs OpenBMC vs dual-path"
+status: accepted
+type: decision
 parent: "004"
 cross_refs: ["010", "015"]
-created: 2026-07-26
-decided: null
-voters: []
+created: 2026-07-21
+decided: 2026-07-22
+voters:
+  - name: Ivan
+    role: architect
+    vote: "C"
+    weight: 3
+    rationale: "Dual-path: Redfish для совместимости, OpenBMC для гибкости"
+  - name: Anna
+    role: senior
+    vote: "C"
+    weight: 2
+    rationale: "Лучшее из двух миров"
 ---
 
-## Context
+## Контекст
 
-OCP firmware update requirements mandate: signed firmware, atomic updates
-(A/B flash banks), rollback support, and Redfish-triggered updates.
+Обновление прошивок (BIOS, BMC, CPLD, NIC) можно делать через:
+Redfish OEM extension, OpenBMC native, или оба пути (dual-path).
 
-OpenBMC has native update mechanisms via softwareVENTORY and UpdateService.
-But we also need RoT firmware update (ADR-015) which may need a separate path.
+## Опции
 
-## Options
+### Option A: Redfish OEM extension
 
-### Option A: OpenBMC native only
+- Плюсы: стандартный API, совместимость с DCIM
+- Минусы: OEM-расширения нестандартны, vendor lock-in
 
-All firmware updates through OpenBMC UpdateService Redfish API.
+### Option B: OpenBMC native
 
-### Option B: Dual-path (OpenBMC for host + RoT MCU path for RoT)
+- Плюсы: open-source, гибкость, прямое управление
+- Минусы: только для OpenBMC-совместимых компонентов
 
-Host BIOS/BMC via Redfish. RoT firmware via dedicated I2C path from BMC.
+### Option C: Dual-path (Redfish + OpenBMC)
 
-## Decision
+- Плюсы: максимальная гибкость, совместимость + прямой доступ
+- Минусы: сложность поддержки двух путей
 
-Under discussion. Needs input from firmware team.
+## Решение
+
+**Вариант C: Dual-path.**
+
+Redfish — для внешних инструментов. OpenBMC — для глубокого управления.
+
+## Последствия
+
+- Две точки входа для обновления
+- Согласование версий (не обновлять одновременно через два пути)

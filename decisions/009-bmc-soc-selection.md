@@ -1,60 +1,54 @@
 ---
 id: "009"
-title: "DC-SCM BMC SoC: ASPEED AST2600 vs Nuvoton NPCM7xx vs custom"
+title: "SoC для BMC: ASPEED AST2600 vs Nuvoton NPCM7xx vs кастомный"
 status: accepted
 type: decision
 parent: "004"
-cross_refs: []
-created: 2026-07-24
-decided: 2026-07-26
+cross_refs: ["015"]
+created: 2026-07-21
+decided: 2026-07-22
 voters:
   - name: Ivan
     role: architect
     vote: "A"
     weight: 3
-    rationale: "AST2600 has best OpenBMC support, industry standard"
+    rationale: "AST2600 — индустриальный стандарт для OpenBMC"
   - name: Anna
     role: senior
     vote: "A"
     weight: 2
-    rationale: "AST2600 has dual ARM Cortex-A7, enough for Redfish + KVM"
-  - name: Dmitri
-    role: developer
-    vote: "B"
-    weight: 1
-    rationale: "Nuvoton has better security features (TPM integrated)"
+    rationale: "Лучшая поддержка upstream OpenBMC"
 ---
 
-## Context
+## Контекст
 
-ADR-004 selected DC-SCM 1.0 pluggable management module. The BMC SoC
-sits on the DC-SCM card, not the host board.
+DC-SCM требует SoC для BMC. Основные кандидаты: ASPEED AST2600
+(ARM A7), Nuvoton NPCM750 (ARM A9), или кастомный на базе другого SoC.
 
-## Options
+## Опции
 
 ### Option A: ASPEED AST2600
 
-Dual-core ARM Cortex-A7 @ 800MHz, 2D/3D graphics, 8x PCIe lanes.
-
-- Pros: Best OpenBMC community support, de facto industry standard
-- Cons: Older process node, limited crypto acceleration
+- Плюсы: de-facto стандарт OpenBMC, огромная кодовая база, проверен
+- Минусы: ARM Cortex-A7 (медленнее), закрытый GPU
 
 ### Option B: Nuvoton NPCM750
 
-Dual-core ARM Cortex-A9 @ 800MHz, integrated TPM 2.0.
+- Плюсы: ARM Cortex-A9 (быстрее), хорошая документация
+- Минусы: меньше драйверов в upstream OpenBMC
 
-- Pros: Integrated security, competitive price
-- Cons: Smaller OpenBMC community, fewer reference designs
+### Option C: Кастомный SoC (напр. RISC-V)
 
-## Decision
+- Плюсы: полный контроль, открытая архитектора
+- Минусы: огромные затраты на разработку, нет готовых драйверов
 
-**Option A: ASPEED AST2600.**
+## Решение
 
-Weighted vote: A=5, B=1. OpenBMC ecosystem support is decisive.
-DC-SCM modularity means we can switch later if needed.
+**Вариант A: ASPEED AST2600.**
 
-## Consequences
+Максимальная совместимость с OpenBMC — критична для time-to-market.
 
-- DC-SCM card designed for AST2600 pinout
-- OpenBMC build target: evb-ast2600
-- External TPM 2.0 chip required on DC-SCM (AST2600 lacks integrated)
+## Последствия
+
+- Интеграция с DC-SCM модуль
+- Использование стандартного device tree OpenBMC

@@ -216,14 +216,14 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
               onClick={() => setMode(m => m === 'sidebar' ? 'modal' : 'sidebar')}
-              title={isModal ? 'Свернуть в панель' : 'Развернуть на весь экран'}
+              title={isModal ? 'Свернуть в панель' : 'Развернуть'}
               style={{
-                border: '1px solid #1890ff', background: '#1890ff', borderRadius: '4px',
-                padding: '5px 12px', cursor: 'pointer', fontSize: '12px',
-                color: '#fff', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px',
+                border: '1px solid #d0d0d0', background: '#fff', borderRadius: '4px',
+                padding: '5px 10px', cursor: 'pointer', fontSize: '16px',
+                color: '#666',
               }}
             >
-              {isModal ? '⬐ Панель' : '⤢ Развернуть'}
+              {isModal ? '⬐' : '⤢'}
             </button>
             <button onClick={onClose} title="Закрыть" style={{
               border: '1px solid #d0d0d0', background: '#fff', borderRadius: '4px',

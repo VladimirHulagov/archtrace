@@ -1,56 +1,44 @@
 ---
 id: "011"
-title: "Networking: OCP NIC 3.0 vs PCIe add-in card"
+title: "Сетевой интерфейс: OCP NIC 3.0 vs PCIe add-in card"
 status: accepted
 type: decision
 parent: "001"
 cross_refs: ["012"]
 created: 2026-07-21
-decided: 2026-07-24
+decided: 2026-07-22
 voters:
   - name: Ivan
     role: architect
     vote: "A"
     weight: 3
-    rationale: "OCP NIC 3.0 is the standard. PCIe cards are legacy"
-  - name: Anna
-    role: senior
-    vote: "A"
-    weight: 2
-    rationale: "Hot-swap NIC without removing tray is huge for ops"
+    rationale: "Hot-swap без извлечения сервера — критичен для операций"
 ---
 
-## Context
+## Контекст
 
-OCP NIC 3.0 specification defines standardized network adapter form factors
-with a common connector, replacing vendor-specific PCIe add-in cards.
+OCP NIC 3.0 определяет форм-фактор сетевой карты с hot-swap
+(замена без выключения сервера). Традиционные PCIe AIC требуют выключения.
 
-Three form factors defined: SFF (single-port), TSFF (tall), LFF (large, multi-port).
-
-## Options
+## Опции
 
 ### Option A: OCP NIC 3.0
 
-Standardized mezzanine-style adapter with OCP connector.
+- Плюсы: hot-swap, OCP-совместимость, стандартизированный разъём
+- Минусы: нужен слот OCP NIC на плате, габариты
 
-- Pros: OCP compliant, hot-swappable, vendor-agnostic, rear-access
-- Cons: New connector footprint, limits to NIC 3.0 compatible products
+### Option B: PCIe Add-in Card
 
-### Option B: PCIe add-in card (standard slot)
+- Плюсы: универсальность, широкая доступность
+- Минусы: требуется выключение для замены, НЕ OCP-совместимо
 
-Traditional PCIe x16 slot on board.
+## Решение
 
-- Pros: Universal compatibility, any PCIe card works
-- Cons: NOT OCP compliant, requires tray removal to service
+**Вариант A: OCP NIC 3.0.**
 
-## Decision
+Hot-swap критичен для обслуживания в production.
 
-**Option A: OCP NIC 3.0.**
+## Последствия
 
-Weighted vote: A=5. OCP compliance is mandatory.
-
-## Consequences
-
-- OCP NIC 3.0 connector on board rear
-- Support at least SFF form factor (LFF optional for multi-port)
-- Rear panel cutout for NIC hot-swap access
+- Слот OCP NIC 3.0 на плате
+- Backplane / тепловое решение для NIC

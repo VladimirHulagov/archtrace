@@ -1,62 +1,44 @@
 ---
 id: "015"
-title: "Hardware Root of Trust: TPM 2.0 vs custom RoT on DC-SCM"
+title: "Аппаратный корень доверия: TPM 2.0 vs кастомный RoT на DC-SCM"
 status: accepted
 type: decision
 parent: "004"
 cross_refs: ["009"]
-created: 2026-07-24
-decided: 2026-07-27
+created: 2026-07-21
+decided: 2026-07-22
 voters:
   - name: Ivan
     role: architect
-    vote: "B"
-    weight: 3
-    rationale: "DC-SCM has dedicated RoT silicon per OCP security spec"
-  - name: Anna
-    role: senior
-    vote: "B"
-    weight: 2
-    rationale: "Platform Firmware Resilience (PFR) needs dedicated RoT"
-  - name: Dmitri
-    role: developer
     vote: "A"
-    weight: 1
-    rationale: "TPM 2.0 is simpler and widely supported"
+    weight: 3
+    rationale: "TPM 2.0 стандартен. Кастомный RoT — риск безопасности."
 ---
 
-## Context
+## Контекст
 
-OCP security spec requires Hardware Root of Trust for measured boot,
-firmware resilience, and attestation. DC-SCM module is the natural place
-for RoT because it's physically separable from the host.
+Аппаратный корень доверия (Root of Trust) обеспечивает проверку целостности
+при загрузке и защиту ключей.
 
-## Options
+## Опции
 
-### Option A: TPM 2.0 chip (discrete)
+### Option A: TPM 2.0 (дискретный чип)
 
-Standard TPM 2.0 (e.g. Infineon SLB9670) on DC-SCM module.
+- Плюсы: международный стандарт, сертификация Common Criteria
+- Минусы: отдельный чип на плате
 
-- Pros: Standard, well-understood, OS-native support
-- Cons: TPM is a passive measurement device, not an active RoT
+### Option B: Кастомный RoT на базе DC-SCM
 
-### Option B: Dedicated RoT MCU on DC-SCM (PFR compliant)
+- Плюсы: интегрирован в модуль управления, гибкость
+- Минусы: нет сертификации, риск уязвимостей
 
-Active RoT controller (e.g. Intel PFR, Max 10) that gates SPI flash,
-verifies firmware signatures before host boot.
+## Решение
 
-- Pros: Platform Firmware Resilience, active boot enforcement
-- Cons: More complex, higher BOM, firmware development
+**Вариант A: TPM 2.0.**
 
-## Decision
+Сертификация и стандарт — приоритет для безопасности.
 
-**Option B: Dedicated RoT MCU (PFR compliant).**
+## Последствия
 
-Weighted vote: A=1, B=5. Active RoT is required for OCP security profile.
-
-## Consequences
-
-- RoT MCU (Intel Max 10 or equivalent) on DC-SCM
-- SPI flash gating circuit required
-- Firmware must support signed updates (ADR-004 OpenBMC requirement)
-- Measured boot measurements stored in RoT, attested via Redfish
+- Дискретный TPM 2.0 на плате
+- Secure Boot цепочка: TPM → CPU firmware → bootloader → OS

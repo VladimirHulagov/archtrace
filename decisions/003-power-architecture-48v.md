@@ -1,65 +1,59 @@
 ---
 id: "003"
-title: "Power architecture: 48V bus bar vs 12V distribution"
+title: "Архитектура питания: шина 48В vs распределение 12В"
 status: accepted
 type: decision
 parent: "001"
-cross_refs: ["007", "008"]
+cross_refs: ["007"]
 created: 2026-07-21
-decided: 2026-07-23
+decided: 2026-07-22
 voters:
   - name: Ivan
     role: architect
     vote: "A"
     weight: 3
-    rationale: "48V is OCP V3 standard, lower I2R losses at scale"
+    rationale: "48V снижает потери I2R. OCP стандарт."
   - name: Anna
     role: senior
     vote: "A"
     weight: 2
-    rationale: "48V reduces bus bar current by 4x vs 12V"
+    rationale: "Меньше меди, проще кабельная инфраструктура"
   - name: Dmitri
     role: developer
     vote: "B"
     weight: 1
-    rationale: "12V is simpler for board-level DC-DC, more VRM options"
+    rationale: "12V проще в разработке плат"
 ---
 
-## Context
+## Контекст
 
-Open Rack V3 specifies a 48V DC bus bar running along the rack vertical.
-Each server taps the bus bar and steps down to board-level voltages.
+ADR-001 требует OCP-совместимости. Open Rack V3 определяет питание через
+шину 48В постоянного тока. Традиционные серверы используют 12В.
 
-Previous Open Rack V2 used 12V. The V3 connector adds a power sense line
-for coordinated power management.
+При 48В потери I²R в шине в 16 раз меньше, чем при 12В при той же мощности
+(ток в 4 раза меньше → потери в 16 раз меньше).
 
-## Options
+## Опции
 
-### Option A: 48V bus bar (OCP V3 native)
+### Option A: 48В шина (Open Rack V3)
 
-Board receives 48V, steps down via intermediate bus converters (IBC) to 12V,
-then point-of-load (POL) regulators to chip voltages.
+- Плюсы: соответствует OCP, меньше потери, меньше меди, выше КПД
+- Минусы: требуется DC-DC преобразование на плате (48В→12В→VRM), сложнее VRM
 
-- Pros: OCP V3 compliant, lower distribution losses, future-proof
-- Cons: More complex board power tree, IBC adds cost and loss stage
+### Option B: 12В распределение
 
-### Option B: 12V bus bar (legacy)
+- Плюсы: проще компоненты, отработанная экосистема VRM, дешевле плата
+- Минусы: НЕ соответствует OCP, большие токи, толстые шины
 
-Board receives 12V directly, POL regulators to chip voltages.
+## Решение
 
-- Pros: Simpler power tree, lower component count
-- Cons: NOT OCP V3 compliant, 4x higher current at same power
+**Вариант A: 48В шина (Open Rack V3).**
 
-## Decision
+OCP-совместимость — жёсткое требование. Потери I²R критичны при высокой плотности.
 
-**Option A: 48V bus bar.**
+## Последствия
 
-Weighted vote: A=5, B=1. OCP V3 compliance is mandatory, and 48V
-distribution is the right engineering choice at rack scale.
-
-## Consequences
-
-- Need 48V-to-12V intermediate bus converters on board
-- Power shelf must output 48V (OCP V3 PSU spec)
-- Bus bar connector with power sense line required
-- Thermal budget includes IBC losses (~3-5% of input power)
+- На каждой плате нужен DC-DC 48В→12В (или напрямую к VRM)
+- Требуется OCP-совместимый коннектор шины питания
+- Меньше тепловыделение в шине питания
+- Бюджет питания должен учитывать КПД DC-DC каскада

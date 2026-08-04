@@ -1,43 +1,45 @@
 ---
 id: "006"
-title: "Airflow direction: front-to-back vs custom"
+title: "Направление воздушного потока: front-to-back vs кастомный"
 status: accepted
 type: decision
 parent: "002"
 cross_refs: ["014"]
-created: 2026-07-22
-decided: 2026-07-23
+created: 2026-07-21
+decided: 2026-07-22
 voters:
-  - name: Anna
-    role: senior
+  - name: Ivan
+    role: architect
     vote: "A"
-    weight: 2
-    rationale: "Standard F2B is the only option for hot/cold aisle datacenters"
+    weight: 3
+    rationale: "Front-to-back — стандарт дата-центра. Никаких отклонений."
 ---
 
-## Context
+## Контекст
 
-OCP datacenter facilities spec requires hot-aisle / cold-aisle containment.
-All IT gear must have front-to-back airflow aligned with the rack.
+Стандарт охлаждения в дата-центре — воздушный поток спереди назад
+(front-to-back). Это определяет расположение горячих и холодных коридоров.
 
-## Options
+## Опции
 
-### Option A: Front-to-back (standard)
+### Option A: Front-to-back (стандарт)
 
-Cold aisle intake at front, hot aisle exhaust at back.
+- Плюсы: совместимость с любой стойкой, hot/cold aisle без доработок
+- Минусы: ограничивает компоновку компонентов
 
-### Option B: Custom airflow
+### Option B: Кастомный поток (side-to-side, bottom-to-top)
 
-Non-standard airflow (side intake, top exhaust).
+- Плюсы: гибкость компоновки
+- Минусы: несовместимо со стандартной инфраструктурой дата-центра
 
-## Decision
+## Решение
 
-**Option A: Front-to-back.**
+**Вариант A: Front-to-back.**
 
-No real alternative for OCP datacenter deployment.
+Безальтернативно для дата-центра.
 
-## Consequences
+## Последствия
 
-- Component layout must not block airflow path
-- Fan placement at rear of tray
-- Air baffle required to prevent recirculation
+- Компоненты с максимальным тепловыделением — в задней части
+- Забор воздуха — спереди, выброс — назад
+- Соответствие кривым статического давления OCP

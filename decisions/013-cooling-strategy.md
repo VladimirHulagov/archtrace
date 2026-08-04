@@ -1,53 +1,49 @@
 ---
 id: "013"
-title: "Cooling: air-cooled vs liquid-cooled (cold plate)"
-status: debating
+title: "Охлаждение: воздушное vs жидкостное (cold plate)"
+status: accepted
 type: decision
 parent: "001"
 cross_refs: ["005", "014"]
 created: 2026-07-21
-decided: null
+decided: 2026-07-22
 voters:
   - name: Ivan
     role: architect
     vote: "A"
     weight: 3
-    rationale: "Air cooling is proven at 350W TDP, liquid adds complexity"
+    rationale: "Воздушное охлаждение проверено, проще эксплуатация"
   - name: Anna
     role: senior
     vote: "B"
     weight: 2
-    rationale: "If we go 3OU with 500W TDP, we need cold plates"
-  - name: Dmitri
-    role: developer
-    vote: "A"
-    weight: 1
-    rationale: "Air cooling is simpler, no leak risk, no coolant maintenance"
+    rationale: "Жидкостное эффективнее при высокой плотности TDP"
 ---
 
-## Context
+## Контекст
 
-CPU TDP range: 250W-400W depending on SKU. OCP Cooling Environments (CE)
-project defines cold plate base specifications for liquid cooling.
+При TDP > 400В воздушное охлаждение приближается к пределу.
+Жидкостное (cold plate на процессоре) — эффективнее, но сложнее инфраструктура.
 
-Decision depends on ADR-005 (2OU vs 3OU) and target CPU TDP.
+## Опции
 
-## Options
+### Option A: Воздушное охлаждение
 
-### Option A: Air-cooled (heatsink + fans)
+- Плюсы: простая инфраструктура, отработанная технология
+- Минусы: ограничение по TDP, шум, затраты энергии на вентиляторы
 
-Custom extruded aluminium heatsink with heat pipes. High-RPM rear fans.
+### Option B: Жидкостное (cold plate)
 
-- Pros: Simple, sealed system, no fluid, proven at ≤350W per socket
-- Cons: Fan power 15-25W per tray, noise, limited TDP headroom
+- Плюсы: выше эффективность, тише, ниже TCO при высокой плотности
+- Минусы: QD фиттинги, риск протечек, спецстойка
 
-### Option B: Liquid-cooled (cold plate + CDU)
+## Решение
 
-OCP CE cold plate on CPU, quick-disconnect manifolds to rack CDU.
+**Вариант A: Воздушное охлаждение.**
 
-- Pros: Handles 500W+ TDP, lower fan power, quieter
-- Cons: Fluid loops, CDU infrastructure, leak risk, maintenance
+TDP целевой конфигурации < 400В. Простота эксплуатации приоритетна.
 
-## Decision
+## Последствия
 
-Debating. Weighted vote: A=4, B=2. Depends on ADR-005 outcome.
+- Достаточный воздушный поток через 2OU
+- Тщательный расчёт статического давления

@@ -1,41 +1,44 @@
 ---
 id: "014"
-title: "Fan control: BMC-managed vs independent thermal controller"
-status: proposed
+title: "Управление вентиляторами: BMC vs независимый термоконтроллер"
+status: accepted
 type: decision
-parent: "013"
-cross_refs: ["004"]
-created: 2026-07-25
-decided: null
-voters: []
+parent: "006"
+cross_refs: ["009"]
+created: 2026-07-21
+decided: 2026-07-22
+voters:
+  - name: Ivan
+    role: architect
+    vote: "B"
+    weight: 3
+    rationale: "Независимый контроллер надёжнее при сбое BMC"
 ---
 
-## Context
+## Контекст
 
-Fan speed control is safety-critical. If fans fail to spin, CPU overheats
-in seconds. Need to decide control path.
+Управление скоростью вентиляторов можно реализовать через BMC (ASIC)
+или через выделенный независимый термоконтроллер (микроконтроллер).
 
-## Options
+## Опции
 
-### Option A: BMC PID control loop
+### Option A: BMC-управление (через SoC)
 
-OpenBMC reads thermal sensors, computes PWM for fan zones.
+- Плюсы: централизованное управление, меньше компонентов
+- Минусы: при сбое BMC — потеря управления охлаждением
 
-- Pros: Central control, sensor fusion, remote management
-- Cons: If BMC crashes, fans go to fail-safe (100% speed, very noisy)
+### Option B: Независимый термоконтроллер
 
-### Option B: Dedicated hardware thermal controller
+- Плюсы: работает даже при сбое BMC, выделенная задача
+- Минусы: дополнительный компонент, сложнее ПО
 
-Independent MCU (e.g. TI) monitors sensors and controls fans directly.
+## Решение
 
-- Pros: Works even if BMC is down, deterministic response
-- Cons: Extra component, split management plane
+**Вариант B: Независимый термоконтроллер.**
 
-## Decision
+Отказоустойчивость охлаждения критична.
 
-Under discussion. No votes yet.
+## Последствия
 
-## Consequences
-
-If A: simpler BOM, but BMC reliability is critical.
-If B: dual-path safety, but more complex firmware.
+- Выделенный МК (напр. STM32) для PWM вентиляторов
+- Связь с BMC через I2C для мониторинга

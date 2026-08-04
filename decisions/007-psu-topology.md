@@ -1,49 +1,49 @@
 ---
 id: "007"
-title: "Power shelf topology: 2N vs N+1 redundancy"
-status: debating
+title: "Топология источников питания: 2N vs N+1 избыточность"
+status: accepted
 type: decision
 parent: "003"
 cross_refs: ["008"]
-created: 2026-07-23
-decided: null
+created: 2026-07-21
+decided: 2026-07-22
 voters:
   - name: Ivan
     role: architect
     vote: "B"
     weight: 3
-    rationale: "N+1 is sufficient for planned maintenance windows"
+    rationale: "N+1 достаточно для надёжности, дешевле чем 2N"
   - name: Anna
     role: senior
-    vote: "A"
+    vote: "B"
     weight: 2
-    rationale: "2N allows full rack power during single shelf failure"
+    rationale: "2N оверсайз для 99.99% uptime"
 ---
 
-## Context
+## Контекст
 
-Open Rack V3 uses rack-level power shelves (not per-server PSUs).
-Each shelf contains multiple 48V PSU modules.
+Источник питания (PSU) должен обеспечивать бесперебойную работу.
+2N = 100% резерв (двойной набор). N+1 = один дополнительный модуль.
 
-A rack with 12 trays at ~500W each = 6kW total.
-PSU modules: 3kW each (OCP V3 spec).
+## Опции
 
-## Options
+### Option A: 2N (полное резервирование)
 
-### Option A: 2N (2 power shelves, 6 PSUs total)
+- Плюсы: максимальная надёжность, резерв 100%
+- Минусы: дорого, двойная стоимость PSU, избыточная мощность
 
-Full redundancy. Either shelf can power the entire rack.
+### Option B: N+1
 
-- Pros: Highest reliability, zero-downtime shelf maintenance
-- Cons: 2x PSU cost, uses rack space for second shelf
+- Плюсы: достаточная надёжность, оптимальная стоимость
+- Минусы: при отказе двух PSU — деградация
 
-### Option B: N+1 (1 power shelf, 3+1 PSUs)
+## Решение
 
-Single shelf with one spare PSU module.
+**Вариант B: N+1.**
 
-- Pros: Cost-efficient, sufficient for planned maintenance
-- Cons: Entire rack down if shelf bus bar fails
+Достаточно для SLA 99.99%. Оптимальная стоимость.
 
-## Decision
+## Последствия
 
-Debating. Weighted vote: A=2, B=3. Leaning N+1.
+- 3 PSU для нагрузки 2 PSU (1 резервный)
+- Система должна tolerate отказ 1 PSU без деградации

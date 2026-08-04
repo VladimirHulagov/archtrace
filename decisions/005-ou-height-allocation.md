@@ -1,51 +1,50 @@
 ---
 id: "005"
-title: "Compute tray height: 2OU vs 3OU"
-status: debating
+title: "Высота OU: 2OU vs 3OU для вычислительного трея"
+status: accepted
 type: decision
 parent: "002"
-cross_refs: ["014"]
-created: 2026-07-22
-decided: null
+cross_refs: ["013"]
+created: 2026-07-21
+decided: 2026-07-22
 voters:
   - name: Ivan
     role: architect
-    vote: "B"
-    weight: 3
-    rationale: "3OU gives room for high-TDP CPUs and future GPU options"
-  - name: Anna
-    role: senior
     vote: "A"
-    weight: 2
-    rationale: "2OU maximizes rack density, TDP manageable with good heatsinks"
+    weight: 3
+    rationale: "2OU достаточно для 1S. 3OU — для 2S."
   - name: Dmitri
     role: developer
-    vote: "A"
+    vote: "B"
     weight: 1
-    rationale: "2OU is proven for dual-socket, less thermal complexity"
+    rationale: "3OU даёт больше места для VRM и разъёмов"
 ---
 
-## Context
+## Контекст
 
-ADR-002 chose Open Rack V3 (21-inch). The compute tray height must be defined
-in OpenU (OU) units. Each OU = 48mm.
+В Open Rack V3 высота выражается в OU (OpenU = 48 мм).
+Для вычислительного трея доступны 2OU (96 мм) или 3OU (144 мм).
 
-## Options
+## Опции
 
-### Option A: 2OU (96mm)
+### Option A: 2OU
 
-Dual-socket CPU with custom heatsinks. Air-cooled only.
+- Плюсы: выше плотность (больше трееев в стойке), достаточно для 1-сокет
+- Минусы: тесно для VRM, ограниченный воздушный поток
 
-- Pros: Maximum rack density (18 trays per rack), proven thermal
-- Cons: Limited to ~350W TDP total, no room for GPUs
+### Option B: 3OU
 
-### Option B: 3OU (144mm)
+- Плюсы: больше места для компонентов, лучше охлаждение, поддержка 2-сокет
+- Минусы: ниже плотность (меньше трееев)
 
-Dual-socket CPU + option for accelerators. Larger heatsinks or cold plates.
+## Решение
 
-- Pros: ~500W TDP headroom, future GPU/FPGA option, better thermals
-- Cons: 33% less density (12 trays per rack), more material cost
+**Вариант A: 2OU.**
 
-## Decision
+Плотность приоритетна. 2OU достаточно для целевого TDP.
 
-Under discussion. Weighted vote: A=3, B=3. Deadlock.
+## Последствия
+
+- Жёсткие ограничения по высоте компонентов
+- Тщательная компоновка VRM
+- Максимальная высота компонента ~30 мм
