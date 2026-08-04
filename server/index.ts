@@ -13,9 +13,9 @@ import path from 'path';
 import fs from 'fs';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { buildGraph, tallyVotes, type DecisionNode } from './parse.js';
+import { buildGraph, tallyVotes, generateAdrMarkdown, type DecisionNode } from './parse.js';
 import { loadConfig, saveConfig, type ArchTraceConfig } from './config.js';
-import { syncRepo, isRepoReady, getActiveDecisionsDir } from './git-sync.js';
+import { syncRepo, isRepoReady, getActiveDecisionsDir, pushChanges } from './git-sync.js';
 import {
   getComments, addComment, deleteComment,
   getVotes, castVote, removeVote,
@@ -412,6 +412,104 @@ app.get('/api/users', async (_req, res) => {
   try {
     const users = await query('SELECT id, username, role FROM users ORDER BY id');
     res.json(users);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+/**
+ * POST /api/decisions
+ * Create a new ADR. Writes .md file to git, commits + pushes.
+ * Body: { title, parent, type, context, options, decision, consequences }
+ */
+app.post('/api/decisions', async (req, res) => {
+  try {
+    const projectId = getProjectId(req);
+    const dir = await projectDecisionsDir(projectId);
+    const { getProject } = await import('./db.js');
+    const project = await getProject(projectId);
+
+    // Compute next ID
+    const existing = buildGraph(dir);
+    const maxId = existing.nodes.reduce((mx, n) => {
+      const num = parseInt(n.id, 10);
+      return isNaN(num) ? mx : Math.max(mx, num);
+    }, 0);
+    const newId = String(maxId + 1).padStart(3, '0');
+
+    const { filename, content: md } = generateAdrMarkdown({
+      ...req.body,
+      id: newId,
+    });
+
+    const filePath = path.join(dir, filename);
+    fs.writeFileSync(filePath, md, 'utf-8');
+
+    // Push to git if project has a repo
+    if (project?.git_repo_url) {
+      const cloneDir = path.resolve(__dirname, '..', `git-data-${projectId}`);
+      const pushResult = pushChanges(`ADR-${newId}: ${req.body.title}`, loadConfig());
+      res.status(201).json({
+        id: newId,
+        filename,
+        pushResult: pushResult.success ? 'pushed' : 'saved locally',
+        message: pushResult.message,
+      });
+    } else {
+      res.status(201).json({ id: newId, filename, message: 'saved locally (no git repo)' });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * PUT /api/decisions/:id
+ * Edit an existing ADR. Updates the .md file, commits + pushes.
+ * Body: { title, context, options, decision, consequences, status }
+ */
+app.put('/api/decisions/:id', async (req, res) => {
+  try {
+    const projectId = getProjectId(req);
+    const dir = await projectDecisionsDir(projectId);
+    const { getProject } = await import('./db.js');
+    const project = await getProject(projectId);
+
+    // Find existing file
+    const graph = buildGraph(dir);
+    const node = graph.nodes.find(n => n.id === req.params.id);
+    if (!node) return res.status(404).json({ error: 'Decision not found' });
+
+    const filePath = path.join(dir, node.file);
+
+    // Generate updated markdown preserving frontmatter fields
+    const { content: md } = generateAdrMarkdown({
+      id: node.id,
+      title: req.body.title || node.title,
+      status: req.body.status || node.status,
+      type: node.type,
+      parent: node.parent,
+      cross_refs: node.cross_refs,
+      context: req.body.context,
+      options: req.body.options,
+      decision: req.body.decision,
+      consequences: req.body.consequences,
+    });
+
+    fs.writeFileSync(filePath, md, 'utf-8');
+
+    if (project?.git_repo_url) {
+      const cloneDir = path.resolve(__dirname, '..', `git-data-${projectId}`);
+      const pushResult = pushChanges(`Edit ADR-${node.id}: ${req.body.title || node.title}`, loadConfig());
+      res.json({
+        id: node.id,
+        pushResult: pushResult.success ? 'pushed' : 'saved locally',
+        message: pushResult.message,
+      });
+    } else {
+      res.json({ id: node.id, message: 'saved locally (no git repo)' });
+    }
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

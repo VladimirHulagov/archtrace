@@ -7,6 +7,7 @@ import {
   fetchCustomOptions, addCustomOptionApi,
   type Graph, type DecisionNode, type SyncResult,
   type Comment, type Vote, type CustomOption, type Project,
+  createDecision, updateDecision,
 } from './api';
 import { calculateLayout } from './SimpleTree/utils/positions';
 import type { Point } from './SimpleTree/types';
@@ -55,6 +56,7 @@ function App() {
   const [showProjectMenu, setShowProjectMenu] = useState(false);
   const [currentUser, setCurrentUser] = useState<{ id: number; username: string; role: string } | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(false);
   const [users, setUsers] = useState<{ id: number; username: string; role: string }[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<SyncResult | null>(null);
@@ -228,6 +230,21 @@ function App() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', position: 'relative' }}>
+      {/* New decision button — bottom-left */}
+      <button
+        onClick={() => setShowCreateForm(true)}
+        style={{
+          position: 'fixed', bottom: '16px', left: '90px', zIndex: 1000,
+          padding: '6px 14px', borderRadius: '6px', border: '1px solid #1890ff',
+          background: '#1890ff', cursor: 'pointer',
+          fontSize: '12px', color: '#fff', fontWeight: 'bold',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+        }}
+        title="Создать новое решение"
+      >
+        + Решение
+      </button>
+
       {/* Sync button — bottom-left, away from panel controls */}
       <button onClick={handleSync} disabled={syncing} style={{
         position: 'fixed', bottom: '16px', left: '16px', zIndex: 1000,
@@ -352,6 +369,18 @@ function App() {
           onClose={() => setSelectedDetail(null)}
         />
       )}
+      {/* Create Decision Modal */}
+      {showCreateForm && (
+        <CreateDecisionForm
+          nodes={nodes}
+          onClose={() => setShowCreateForm(false)}
+          onCreated={() => {
+            setShowCreateForm(false);
+            reloadGraph();
+          }}
+        />
+      )}
+
     </div>
   );
 }
@@ -368,3 +397,111 @@ function statusColor(status: string): string {
 }
 
 export default App;
+
+
+// ─── Create Decision Form ─────────────────────────────────
+
+function CreateDecisionForm({ nodes, onClose, onCreated }: {
+  nodes: TreeNode[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [parent, setParent] = useState('');
+  const [type, setType] = useState('decision');
+  const [context, setContext] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async () => {
+    if (!title.trim()) { setError('Введите заголовок'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      await createDecision({
+        title: title.trim(),
+        parent: parent || null,
+        type,
+        context: context.trim() || undefined,
+      });
+      onCreated();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 3000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: '8px', padding: '24px',
+        width: '500px', maxHeight: '80vh', overflowY: 'auto',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
+          <h2 style={{ margin: 0, fontSize: '18px' }}>Новое решение</h2>
+          <button onClick={onClose} style={{ border: 'none', background: 'none', fontSize: '20px', cursor: 'pointer', color: '#999' }}>×</button>
+        </div>
+
+        {/* Title */}
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Заголовок *</label>
+          <input type="text" value={title} onChange={e => setTitle(e.target.value)}
+            placeholder="Напр: Выбор системы охлаждения"
+            style={{ width: '100%', padding: '8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '14px', boxSizing: 'border-box' }}
+            autoFocus
+            onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) handleSubmit(); }}
+          />
+        </div>
+
+        {/* Parent */}
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Родительское решение</label>
+          <select value={parent} onChange={e => setParent(e.target.value)}
+            style={{ width: '100%', padding: '8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '14px', boxSizing: 'border-box' }}>
+            <option value="">— Корень (нет родителя) —</option>
+            {nodes.map(n => <option key={n.id} value={n.id}>ADR-{n.id}: {n.text}</option>)}
+          </select>
+        </div>
+
+        {/* Type */}
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Тип</label>
+          <select value={type} onChange={e => setType(e.target.value)}
+            style={{ width: '100%', padding: '8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '14px', boxSizing: 'border-box' }}>
+            <option value="decision">Решение</option>
+            <option value="requirement">Требование</option>
+            <option value="task">Задача</option>
+          </select>
+        </div>
+
+        {/* Context */}
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Контекст</label>
+          <textarea value={context} onChange={e => setContext(e.target.value)}
+            placeholder="Описание контекста и предпосылок..."
+            style={{ width: '100%', minHeight: '80px', padding: '8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'inherit' }}
+          />
+        </div>
+
+        {error && <div style={{ color: '#ff4d4f', fontSize: '12px', marginBottom: '8px' }}>{error}</div>}
+
+        {/* Buttons */}
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '8px 16px', border: '1px solid #d0d0d0', background: '#f0f0f0', borderRadius: '4px', cursor: 'pointer', fontSize: '13px' }}>Отмена</button>
+          <button onClick={handleSubmit} disabled={saving || !title.trim()} style={{
+            padding: '8px 16px', border: 'none', borderRadius: '4px', cursor: saving ? 'wait' : 'pointer',
+            background: saving ? '#91d5ff' : (title.trim() ? '#1890ff' : '#d0d0d0'),
+            color: '#fff', fontSize: '13px', fontWeight: 'bold',
+          }}>
+            {saving ? 'Сохранение...' : 'Создать (Ctrl+Enter)'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

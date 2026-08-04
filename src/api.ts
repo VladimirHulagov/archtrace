@@ -225,3 +225,36 @@ export async function getSyncStatus(): Promise<SyncStatus> {
   if (!res.ok) throw new Error(`Status check failed: ${res.statusText}`);
   return res.json();
 }
+
+
+// ─── ADR CRUD ─────────────────────────────────────────────
+
+export interface AdrInput {
+  title: string;
+  parent?: string | null;
+  type?: string;
+  context?: string;
+  options?: { letter: string; title: string; description?: string }[];
+  decision?: string;
+  consequences?: string;
+}
+
+export async function createDecision(data: AdrInput): Promise<{ id: string; filename: string; message: string }> {
+  const res = await fetch(`${API_BASE}/decisions`, {
+    method: 'POST',
+    headers: jsonHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to create decision');
+  return res.json();
+}
+
+export async function updateDecision(id: string, data: Partial<AdrInput> & { status?: string }): Promise<{ id: string; message: string }> {
+  const res = await fetch(`${API_BASE}/decisions/${id}`, {
+    method: 'PUT',
+    headers: jsonHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to update decision');
+  return res.json();
+}

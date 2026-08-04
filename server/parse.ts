@@ -326,3 +326,69 @@ export function tallyVotes(voters: Voter[]): Record<string, number> {
   }
   return tally;
 }
+
+
+// ─── ADR Markdown Generator ───────────────────────────────
+
+export interface AdrInput {
+  id?: string;
+  title: string;
+  status?: string;
+  type?: string;
+  parent?: string | null;
+  cross_refs?: string[];
+  context?: string;
+  options?: { letter: string; title: string; description?: string }[];
+  decision?: string;
+  consequences?: string;
+}
+
+export function generateAdrMarkdown(input: AdrInput): { filename: string; content: string } {
+  const id = input.id || String(Date.now()).slice(-3);
+  const status = input.status || 'proposed';
+  const type = input.type || 'decision';
+  const parent = input.parent || 'null';
+  const created = new Date().toISOString().split('T')[0];
+
+  // Build frontmatter
+  let fm = `---\nid: "${id}"\ntitle: "${input.title.replace(/"/g, '\\"')}"\n`;
+  fm += `status: ${status}\n`;
+  fm += `type: ${type}\n`;
+  fm += `parent: ${parent === 'null' ? 'null' : `"${parent}"`}\n`;
+  fm += `cross_refs: ${input.cross_refs?.length ? JSON.stringify(input.cross_refs).replace(/\[|\]|"/g, m => m === '[' ? '[' : m === ']' ? ']' : '"') : '[]'}\n`;
+  fm += `created: ${created}\n`;
+  fm += `---\n\n`;
+
+  // Build body
+  let body = '';
+
+  if (input.context) {
+    body += `## Контекст\n\n${input.context}\n\n`;
+  }
+
+  if (input.options?.length) {
+    body += `## Опции\n\n`;
+    for (const opt of input.options) {
+      body += `### Option ${opt.letter}: ${opt.title}\n\n`;
+      if (opt.description) body += `${opt.description}\n\n`;
+    }
+  }
+
+  if (input.decision) {
+    body += `## Решение\n\n${input.decision}\n\n`;
+  }
+
+  if (input.consequences) {
+    body += `## Последствия\n\n${input.consequences}\n\n`;
+  }
+
+  // Filename: slugify title
+  const slug = input.title
+    .toLowerCase()
+    .replace(/[^a-z0-9\u0400-\u04FF]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .substring(0, 40);
+  const filename = `${id.padStart(3, '0')}-${slug}.md`;
+
+  return { filename, content: fm + body };
+}
