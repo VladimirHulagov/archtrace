@@ -8,6 +8,7 @@ import ReactMarkdown from 'react-markdown';
 import type { DecisionNode, Comment, Vote, CustomOption } from './api';
 import {
   postComment, deleteCommentApi, castVoteApi, removeVoteApi, addCustomOptionApi, updateCustomOptionApi,
+  updateDecision,
   startAnalysis, getAnalysisStatus,
   reactToComment,
 } from './api';
@@ -57,6 +58,8 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const [editingContext, setEditingContext] = useState('');
   const [contextVersions, setContextVersions] = useState<string[]>([]);
   const [showContextHistory, setShowContextHistory] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editingTitle, setEditingTitle] = useState('');
   const [commentSort, setCommentSort] = useState<CommentSort>('date');
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -184,6 +187,17 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     setEditingOptionLetter(null); setEditingOptionTitle('');
   }, [editingOptionTitle, detail, customOptions, onCustomOptionsChange]);
 
+  // ─── Title edit handler ────────────────────────────────
+
+  const handleSaveTitle = useCallback(async () => {
+    if (!editingTitle.trim()) { setIsEditingTitle(false); return; }
+    try {
+      await updateDecision(detail.id, { title: editingTitle.trim() });
+      // Update is local — graph reload will pick up the change from git
+      setIsEditingTitle(false);
+    } catch (err) { console.error('Title update error:', err); }
+  }, [editingTitle, detail]);
+
   // ─── AI Analysis handler ────────────────────────────────
 
   const analysisTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -304,7 +318,31 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
         {/* Scrollable content */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
-          <h3 style={{ marginTop: 0, fontSize: '15px' }}>{detail.title}</h3>
+          {isEditingTitle ? (
+            <div style={{ display: 'flex', gap: '6px', marginBottom: '4px' }}>
+              <input
+                type="text"
+                value={editingTitle}
+                onChange={e => setEditingTitle(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleSaveTitle();
+                  if (e.key === 'Escape') setIsEditingTitle(false);
+                }}
+                onBlur={handleSaveTitle}
+                style={{ flex: 1, fontSize: '15px', padding: '4px 8px', border: '1px solid #1890ff', borderRadius: '4px', fontFamily: 'inherit' }}
+                autoFocus
+              />
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 style={{ marginTop: 0, fontSize: '15px', margin: 0 }}>{detail.title}</h3>
+              <button
+                onClick={() => { setEditingTitle(detail.title); setIsEditingTitle(true); }}
+                title="Редактировать название"
+                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '14px', color: '#1890ff', padding: '0' }}
+              >✏️</button>
+            </div>
+          )}
 
           {/* Tags */}
           <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
