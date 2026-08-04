@@ -74,9 +74,19 @@ async function projectDecisionsDir(projectId: number): Promise<string> {
         execSync(`git reset --hard origin/${branch}`, { cwd: cloneDir, stdio: 'pipe', timeout: 15000 });
       }
       dir = path.resolve(cloneDir, repoPath);
-    } catch {
-      // Fallback to main git-data if clone fails
-      dir = isRepoReady() ? getActiveDecisionsDir() : localDecisionsDir;
+    } catch (cloneErr: any) {
+      // Clone failed — use empty per-project dir, NOT fallback to project 1
+      dir = path.resolve(__dirname, '..', `git-data-${projectId}`);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      // Clear any stale .md files from previous failed clone
+      try {
+        const existing = fs.readdirSync(dir);
+        for (const f of existing) {
+          if (f.endsWith('.md')) fs.unlinkSync(path.join(dir, f));
+        }
+      } catch {}
     }
   } else if (projectId === 1) {
     // Project 1: use default git-data or local
