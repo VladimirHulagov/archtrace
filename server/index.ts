@@ -10,6 +10,8 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { buildGraph, tallyVotes, type DecisionNode } from './parse.js';
 import { loadConfig, saveConfig, type ArchTraceConfig } from './config.js';
@@ -32,15 +34,59 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+// Cache of project → decisions dir
+const projectDirCache = new Map<number, string>();
+
 /**
- * Get the active decisions directory.
- * If the repo is synced, read from git-data/. Otherwise fall back to local decisions/.
+ * Get decisions directory for a specific project.
+ * Each project with a git_repo_url gets its own clone at git-data-<projectId>/.
+ * Projects without git_repo_url get an empty temp dir.
  */
-function activeDecisionsDir(): string {
-  if (isRepoReady()) {
-    return getActiveDecisionsDir();
+async function projectDecisionsDir(projectId: number): Promise<string> {
+  if (projectDirCache.has(projectId)) {
+    return projectDirCache.get(projectId)!;
   }
-  return localDecisionsDir;
+
+  const { getProject } = await import('./db.js');
+  const project = await getProject(projectId);
+
+  let dir: string;
+  if (project && project.git_repo_url) {
+    // Clone/sync this project's repo into a per-project dir
+    const cloneDir = path.resolve(__dirname, '..', `git-data-${projectId}`);
+    const branch = project.git_branch || 'main';
+    const repoPath = project.git_path || '.';
+
+    try {
+      const gitDirExists = fs.existsSync(path.join(cloneDir, '.git'));
+      if (!gitDirExists) {
+        if (fs.existsSync(cloneDir)) {
+          fs.rmSync(cloneDir, { recursive: true, force: true });
+        }
+        execSync(`git clone --depth 1 --branch ${branch} "${project.git_repo_url}" "${cloneDir}"`,
+          { stdio: 'pipe', timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+      } else {
+        execSync(`git fetch origin ${branch} --depth 1`, { cwd: cloneDir, stdio: 'pipe', timeout: 30000 });
+        execSync(`git reset --hard origin/${branch}`, { cwd: cloneDir, stdio: 'pipe', timeout: 15000 });
+      }
+      dir = path.resolve(cloneDir, repoPath);
+    } catch {
+      // Fallback to main git-data if clone fails
+      dir = isRepoReady() ? getActiveDecisionsDir() : localDecisionsDir;
+    }
+  } else if (projectId === 1) {
+    // Project 1: use default git-data or local
+    dir = isRepoReady() ? getActiveDecisionsDir() : localDecisionsDir;
+  } else {
+    // No repo — create empty dir
+    dir = path.resolve(__dirname, '..', `git-data-${projectId}`);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  }
+
+  projectDirCache.set(projectId, dir);
+  return dir;
 }
 
 // ─── Config Routes ───────────────────────────────────────
@@ -120,9 +166,10 @@ app.get('/api/sync/status', (_req, res) => {
 
 // ─── Graph and Decision Routes ───────────────────────────
 
-app.get('/api/graph', (_req, res) => {
+app.get('/api/graph', async (req, res) => {
   try {
-    const dir = activeDecisionsDir();
+    const projectId = getProjectId(req);
+    const dir = await projectDecisionsDir(projectId);
     const graph = buildGraph(dir);
     res.json(graph);
   } catch (err: any) {
@@ -131,9 +178,10 @@ app.get('/api/graph', (_req, res) => {
   }
 });
 
-app.get('/api/decisions/:id', (req, res) => {
+app.get('/api/decisions/:id', async (req, res) => {
   try {
-    const dir = activeDecisionsDir();
+    const projectId = getProjectId(req);
+    const dir = await projectDecisionsDir(projectId);
     const graph = buildGraph(dir);
     const node = graph.nodes.find(n => n.id === req.params.id);
     if (!node) {
@@ -153,7 +201,6 @@ app.get('/api/health', (_req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     repoReady: isRepoReady(),
-    decisionsDir: activeDecisionsDir(),
   });
 });
 
@@ -384,7 +431,7 @@ app.listen(PORT, () => {
     console.log(`Sync result: ${result.action} - ${result.message}`);
   }
 
-  console.log(`Decisions directory: ${activeDecisionsDir()}`);
+  console.log(`Project 1 decisions: ready`);
 
   checkDb().then(ok => {
     console.log(`Database: ${ok ? 'connected' : 'NOT CONNECTED (comments/votes disabled)'}`);

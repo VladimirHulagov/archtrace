@@ -67,14 +67,14 @@ function App() {
   // ─── ALL useCallback hooks (before any early return) ───
 
   const reloadGraph = useCallback(async () => {
-    const graph = await fetchGraph();
+    const graph = await fetchGraph(currentProject?.id || 1);
     const treeNodes = graph.nodes.map(decisionToTreeNode);
     const treeConnections = graph.connections.map(c => ({ id: c.id, from: c.from, to: c.to, kind: c.kind }));
     const { nodes: positioned, edgePoints: ePoints } = calculateLayout(treeNodes, treeConnections, window.innerWidth);
     setNodes(positioned);
     setConnections(treeConnections);
     setEdgePoints(ePoints);
-  }, []);
+  }, [currentProject]);
 
   const handleSync = useCallback(async () => {
     setSyncing(true);
@@ -91,16 +91,23 @@ function App() {
     } finally { setSyncing(false); }
   }, [reloadGraph]);
 
-  const handleProjectSwitch = useCallback((project: Project) => {
+  const handleProjectSwitch = useCallback(async (project: Project) => {
     setCurrentProject(project);
     setProjectId(project.id);
     setShowProjectMenu(false);
-    if (project.git_repo_url) {
-      syncRepo().then(() => reloadGraph());
-    } else {
-      reloadGraph();
+    setSelectedDetail(null);
+    // Fetch graph with the NEW project ID directly (not via state)
+    try {
+      const graph = await fetchGraph(project.id);
+      const treeNodes = graph.nodes.map(decisionToTreeNode);
+      const treeConnections = graph.connections.map(c => ({ id: c.id, from: c.from, to: c.to, kind: c.kind }));
+      const { nodes: positioned, edgePoints: ePoints } = calculateLayout(treeNodes, treeConnections, window.innerWidth);
+      setNodes(positioned); setConnections(treeConnections); setEdgePoints(ePoints);
+    } catch (err) {
+      // If fails, show empty tree
+      setNodes([]); setConnections([]); setEdgePoints(new Map());
     }
-  }, [reloadGraph]);
+  }, []);
 
   const handleNodeDrag = useCallback((nodeId: string, x: number, y: number) => {
     setNodes(prev => prev.map(n => n.id === nodeId ? { ...n, x, y } : n));

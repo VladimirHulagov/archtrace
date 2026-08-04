@@ -189,14 +189,16 @@ function jsonHeaders(): Record<string, string> {
 
 const API_BASE = '/api';
 
-export async function fetchGraph(): Promise<Graph> {
-  const res = await fetch(`${API_BASE}/graph`);
+export async function fetchGraph(projectId?: number): Promise<Graph> {
+  const url = projectId ? `${API_BASE}/graph?projectId=${projectId}` : `${API_BASE}/graph`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch graph: ${res.statusText}`);
   return res.json();
 }
 
-export async function fetchDecision(id: string): Promise<DecisionNode & { voteTally: Record<string, number> }> {
-  const res = await fetch(`${API_BASE}/decisions/${id}`);
+export async function fetchDecision(id: string, projectId?: number): Promise<DecisionNode & { voteTally: Record<string, number> }> {
+  const url = projectId ? `${API_BASE}/decisions/${id}?projectId=${projectId}` : `${API_BASE}/decisions/${id}`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch decision: ${res.statusText}`);
   return res.json();
 }
