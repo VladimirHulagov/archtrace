@@ -29,6 +29,7 @@ export const Tree: React.FC<TreeProps> = ({
   onAddConnection,
   onDeleteConnection,
   edgePoints,
+  pendingNewNode,
   onDeselect,
   className,
 }) => {
@@ -212,6 +213,13 @@ export const Tree: React.FC<TreeProps> = ({
     setConnectionSourceId(null);
     announce('Connection cancelled. Click a node to start a new connection.');
   }, [announce]);
+
+  // Open modal automatically for pending new node
+  useEffect(() => {
+    if (pendingNewNode) {
+      setEditingNode(pendingNewNode);
+    }
+  }, [pendingNewNode]);
 
   const handleModalSave = useCallback(
     (node: TreeNode) => {

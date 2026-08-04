@@ -57,6 +57,7 @@ function App() {
   const [currentUser, setCurrentUser] = useState<{ id: number; username: string; role: string } | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [pendingNewNode, setPendingNewNode] = useState<TreeNode | null>(null);
   const [showRepoSetup, setShowRepoSetup] = useState(false);
   const [repoSetupProject, setRepoSetupProject] = useState<Project | null>(null);
   const [repoUrl, setRepoUrl] = useState('');
@@ -98,6 +99,47 @@ function App() {
       setShowSyncBanner(true);
       setTimeout(() => setShowSyncBanner(false), 5000);
     } finally { setSyncing(false); }
+  }, [reloadGraph]);
+
+  // Create empty node and open editor modal
+  const handleCreateAndEdit = useCallback(() => {
+    const newId = `new-${nodeIdCounter.current++}`;
+    const newNode: TreeNode = {
+      id: newId,
+      x: 400, y: 50 + nodes.length * 80,
+      text: '', type: 'rich', status: 'proposed',
+      icon: '💡', description: '',
+    };
+    setPendingNewNode(newNode);
+    setNodes(prev => [...prev, newNode]);
+  }, [nodes]);
+
+  // When new node is saved via modal → create in API
+  const handleUpdateNode = useCallback(async (updatedNode: TreeNode) => {
+    // Check if this is a new node (starts with 'new-')
+    if (updatedNode.id.startsWith('new-') && updatedNode.text.trim()) {
+      try {
+        const result = await createDecision({
+          title: updatedNode.text.trim(),
+          parent: null,
+          type: 'decision',
+          context: updatedNode.description || undefined,
+        });
+        // Replace local node with real one
+        setNodes(prev => prev.map(n => n.id === updatedNode.id ? { ...updatedNode, id: result.id } : n));
+        setPendingNewNode(null);
+        // Reload graph to get proper layout
+        reloadGraph();
+      } catch (err) {
+        console.error('Create failed:', err);
+        // Remove the failed node
+        setNodes(prev => prev.filter(n => n.id !== updatedNode.id));
+        setPendingNewNode(null);
+      }
+    } else {
+      // Existing node — just update locally
+      setNodes(prev => prev.map(n => n.id === updatedNode.id ? updatedNode : n));
+    }
   }, [reloadGraph]);
 
   const handleProjectSwitch = useCallback(async (project: Project) => {
@@ -155,9 +197,7 @@ function App() {
     setConnections(prev => prev.filter(c => c.from !== nodeId && c.to !== nodeId));
   }, []);
 
-  const handleUpdateNode = useCallback((updatedNode: TreeNode) => {
-    setNodes(prev => prev.map(n => n.id === updatedNode.id ? updatedNode : n));
-  }, []);
+
 
   const handleAddConnection = useCallback((fromId: string, toId: string) => {
     const connId = `c${connectionIdCounter.current++}`;
@@ -284,7 +324,7 @@ function App() {
     <div style={{ width: '100vw', height: '100vh', display: 'flex', position: 'relative' }}>
       {/* New decision button — bottom-left */}
       <button
-        onClick={() => setShowCreateForm(true)}
+        onClick={handleCreateAndEdit}
         style={{
           position: 'fixed', bottom: '16px', left: '90px', zIndex: 1000,
           padding: '6px 14px', borderRadius: '6px', border: '1px solid #1890ff',
@@ -397,6 +437,7 @@ function App() {
       <div style={{ flex: 1, position: 'relative' }}>
         <Tree
           nodes={nodes} connections={connections}
+          pendingNewNode={pendingNewNode}
           onNodeDrag={handleNodeDrag} onAddNode={handleAddNode}
           onDeleteNode={handleDeleteNode} onUpdateNode={handleUpdateNode}
           onAddConnection={handleAddConnection} onDeleteConnection={handleDeleteConnection}

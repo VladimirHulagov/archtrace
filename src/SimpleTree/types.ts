@@ -41,4 +41,5 @@ export interface SimpleTreeProps {
   onDeselect?: () => void;
   width?: number;
   height?: number;
+  pendingNewNode?: TreeNode | null;
 }
