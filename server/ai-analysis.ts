@@ -34,7 +34,7 @@ export async function runArchitecturalAnalysis(ctx: AnalysisContext): Promise<{ 
       { role: 'user', content: prompt },
     ],
     temperature: 0.7,
-    max_tokens: 800,
+    max_tokens: 4000,
   });
 
   const response = await callZai(requestBody);
