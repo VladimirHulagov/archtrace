@@ -171,7 +171,14 @@ app.post('/api/client-errors', (req, res) => {
 
 // ─── DB-backed routes: comments, votes, options ──────────
 
-const DEFAULT_PROJECT_ID = 1;
+// Project ID from X-Project-Id header or query, defaults to 1
+function getProjectId(req: express.Request): number {
+  const hdr = req.header('X-Project-Id');
+  if (hdr) return parseInt(hdr, 10);
+  const q = (req.query as any).projectId;
+  if (q) return parseInt(q, 10);
+  return 1;
+}
 
 /**
  * GET /api/comments/:nodeId
@@ -179,7 +186,7 @@ const DEFAULT_PROJECT_ID = 1;
  */
 app.get('/api/comments/:nodeId', async (req, res) => {
   try {
-    const comments = await getComments(req.params.nodeId, DEFAULT_PROJECT_ID);
+    const comments = await getComments(req.params.nodeId, getProjectId(req));
     res.json(comments);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -202,7 +209,7 @@ app.post('/api/comments/:nodeId', async (req, res) => {
     const userId = 1;
 
     const comment = await addComment(
-      req.params.nodeId, DEFAULT_PROJECT_ID, userId, content.trim(), parentCommentId || null
+      req.params.nodeId, getProjectId(req), userId, content.trim(), parentCommentId || null
     );
     res.status(201).json(comment);
   } catch (err: any) {
@@ -232,7 +239,7 @@ app.delete('/api/comments/:commentId', async (req, res) => {
  */
 app.get('/api/votes/:nodeId', async (req, res) => {
   try {
-    const votes = await getVotes(req.params.nodeId, DEFAULT_PROJECT_ID);
+    const votes = await getVotes(req.params.nodeId, getProjectId(req));
     res.json(votes);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -254,7 +261,7 @@ app.post('/api/votes/:nodeId', async (req, res) => {
     const userWeight = weight || 1;
 
     const vote = await castVote(
-      req.params.nodeId, DEFAULT_PROJECT_ID, userId,
+      req.params.nodeId, getProjectId(req), userId,
       optionLetter, userWeight, rationale || null
     );
     res.status(201).json(vote);
@@ -270,7 +277,7 @@ app.post('/api/votes/:nodeId', async (req, res) => {
 app.delete('/api/votes/:nodeId', async (req, res) => {
   try {
     const userId = 1; // TODO: real auth
-    const removed = await removeVote(req.params.nodeId, DEFAULT_PROJECT_ID, userId);
+    const removed = await removeVote(req.params.nodeId, getProjectId(req), userId);
     if (!removed) return res.status(404).json({ error: 'Vote not found' });
     res.status(204).end();
   } catch (err: any) {
@@ -284,7 +291,7 @@ app.delete('/api/votes/:nodeId', async (req, res) => {
  */
 app.get('/api/options/:nodeId', async (req, res) => {
   try {
-    const options = await getCustomOptions(req.params.nodeId, DEFAULT_PROJECT_ID);
+    const options = await getCustomOptions(req.params.nodeId, getProjectId(req));
     res.json(options);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -304,7 +311,7 @@ app.post('/api/options/:nodeId', async (req, res) => {
 
     const userId = 1; // TODO: real auth
     const option = await addCustomOption(
-      req.params.nodeId, DEFAULT_PROJECT_ID,
+      req.params.nodeId, getProjectId(req),
       letter.toUpperCase(), title, userId
     );
     res.status(201).json(option);
@@ -317,6 +324,20 @@ app.post('/api/options/:nodeId', async (req, res) => {
  * GET /api/db-health
  * Check database connectivity.
  */
+
+/**
+ * GET /api/projects
+ * List all projects.
+ */
+app.get('/api/projects', async (_req, res) => {
+  try {
+    const projects = await getProjects();
+    res.json(projects);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/db-health', async (_req, res) => {
   const ok = await checkDb();
   res.json({ db: ok ? 'ok' : 'error' });

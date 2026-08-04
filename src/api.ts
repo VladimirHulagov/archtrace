@@ -92,7 +92,7 @@ export interface CustomOption {
 // ─── DB API Functions ────────────────────────────────────
 
 export async function fetchComments(nodeId: string): Promise<Comment[]> {
-  const res = await fetch(`${API_BASE}/comments/${nodeId}`);
+  const res = await fetch(`${API_BASE}/comments/${nodeId}`, { headers: projectHeaders() });
   if (!res.ok) return [];
   return res.json();
 }
@@ -100,7 +100,7 @@ export async function fetchComments(nodeId: string): Promise<Comment[]> {
 export async function postComment(nodeId: string, content: string, parentCommentId?: number): Promise<Comment> {
   const res = await fetch(`${API_BASE}/comments/${nodeId}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonHeaders(),
     body: JSON.stringify({ content, parentCommentId }),
   });
   if (!res.ok) throw new Error('Failed to post comment');
@@ -108,13 +108,13 @@ export async function postComment(nodeId: string, content: string, parentComment
 }
 
 export async function deleteCommentApi(commentId: number): Promise<void> {
-  await fetch(`${API_BASE}/comments/${commentId}`, { method: 'DELETE' });
+  await fetch(`${API_BASE}/comments/${commentId}`, { method: 'DELETE', headers: projectHeaders() });
 }
 
 export async function reactToComment(commentId: number, reaction: 'like' | 'dislike'): Promise<{ likes: number; dislikes: number; userReaction: string | null }> {
   const res = await fetch(`${API_BASE}/comments/${commentId}/react`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonHeaders(),
     body: JSON.stringify({ reaction }),
   });
   if (!res.ok) throw new Error('Failed to react');
@@ -122,7 +122,7 @@ export async function reactToComment(commentId: number, reaction: 'like' | 'disl
 }
 
 export async function fetchVotes(nodeId: string): Promise<Vote[]> {
-  const res = await fetch(`${API_BASE}/votes/${nodeId}`);
+  const res = await fetch(`${API_BASE}/votes/${nodeId}`, { headers: projectHeaders() });
   if (!res.ok) return [];
   return res.json();
 }
@@ -130,7 +130,7 @@ export async function fetchVotes(nodeId: string): Promise<Vote[]> {
 export async function castVoteApi(nodeId: string, optionLetter: string, weight: number, rationale?: string): Promise<Vote> {
   const res = await fetch(`${API_BASE}/votes/${nodeId}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonHeaders(),
     body: JSON.stringify({ optionLetter, weight, rationale }),
   });
   if (!res.ok) throw new Error('Failed to cast vote');
@@ -138,11 +138,11 @@ export async function castVoteApi(nodeId: string, optionLetter: string, weight: 
 }
 
 export async function removeVoteApi(nodeId: string): Promise<void> {
-  await fetch(`${API_BASE}/votes/${nodeId}`, { method: 'DELETE' });
+  await fetch(`${API_BASE}/votes/${nodeId}`, { method: 'DELETE', headers: projectHeaders() });
 }
 
 export async function fetchCustomOptions(nodeId: string): Promise<CustomOption[]> {
-  const res = await fetch(`${API_BASE}/options/${nodeId}`);
+  const res = await fetch(`${API_BASE}/options/${nodeId}`, { headers: projectHeaders() });
   if (!res.ok) return [];
   return res.json();
 }
@@ -150,11 +150,41 @@ export async function fetchCustomOptions(nodeId: string): Promise<CustomOption[]
 export async function addCustomOptionApi(nodeId: string, letter: string, title: string): Promise<CustomOption> {
   const res = await fetch(`${API_BASE}/options/${nodeId}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonHeaders(),
     body: JSON.stringify({ letter, title }),
   });
   if (!res.ok) throw new Error('Failed to add option');
   return res.json();
+}
+
+
+export interface Project {
+  id: number;
+  name: string;
+  description: string | null;
+  git_repo_url: string | null;
+  git_branch: string;
+  git_path: string;
+}
+
+export async function fetchProjects(): Promise<Project[]> {
+  const res = await fetch(`${API_BASE}/projects`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+
+// Current project ID — updated when user switches project
+let _currentProjectId = 1;
+export function setProjectId(id: number) { _currentProjectId = id; }
+
+
+function projectHeaders(): Record<string, string> {
+  return { 'X-Project-Id': String(_currentProjectId) };
+}
+
+function jsonHeaders(): Record<string, string> {
+  return { ...projectHeaders(), 'Content-Type': 'application/json' };
 }
 
 const API_BASE = '/api';

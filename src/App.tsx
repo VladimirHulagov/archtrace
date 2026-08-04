@@ -1,12 +1,12 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Tree, TreeNode } from './SimpleTree';
 import {
-  fetchGraph, syncRepo,
+  fetchGraph, syncRepo, fetchProjects, setProjectId,
   fetchComments, postComment, deleteCommentApi,
   fetchVotes, castVoteApi, removeVoteApi,
   fetchCustomOptions, addCustomOptionApi,
   type Graph, type DecisionNode, type SyncResult,
-  type Comment, type Vote, type CustomOption,
+  type Comment, type Vote, type CustomOption, type Project,
 } from './api';
 import { calculateLayout } from './SimpleTree/utils/positions';
 import type { Point } from './SimpleTree/types';
@@ -50,6 +50,9 @@ function App() {
   const connectionIdCounter = useRef(1000);
   const swipeStartX = useRef<number | null>(null);
   const [edgePoints, setEdgePoints] = useState<Map<string, Point[]>>(new Map());
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [currentProject, setCurrentProject] = useState<Project | null>(null);
+  const [showProjectMenu, setShowProjectMenu] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<SyncResult | null>(null);
   const [showSyncBanner, setShowSyncBanner] = useState(false);
@@ -86,6 +89,17 @@ function App() {
       setShowSyncBanner(true);
       setTimeout(() => setShowSyncBanner(false), 5000);
     } finally { setSyncing(false); }
+  }, [reloadGraph]);
+
+  const handleProjectSwitch = useCallback((project: Project) => {
+    setCurrentProject(project);
+    setProjectId(project.id);
+    setShowProjectMenu(false);
+    if (project.git_repo_url) {
+      syncRepo().then(() => reloadGraph());
+    } else {
+      reloadGraph();
+    }
   }, [reloadGraph]);
 
   const handleNodeDrag = useCallback((nodeId: string, x: number, y: number) => {
@@ -175,6 +189,7 @@ function App() {
   // ─── Fetch graph on mount ──────────────────────────────
 
   useEffect(() => {
+    fetchProjects().then(setProjects).catch(() => {});
     fetchGraph().then((graph: Graph) => {
       const treeNodes = graph.nodes.map(decisionToTreeNode);
       const treeConnections = graph.connections.map(c => ({ id: c.id, from: c.from, to: c.to, kind: c.kind }));
@@ -224,6 +239,40 @@ function App() {
           {lastSync.success ? '✅' : '❌'} {lastSync.message}
         </div>
       )}
+
+      {/* Project selector — top-left */}
+      <div style={{ position: 'fixed', top: '12px', left: '16px', zIndex: 1000 }}>
+        <button
+          onClick={() => setShowProjectMenu(!showProjectMenu)}
+          style={{
+            border: '1px solid #d0d0d0', background: '#fff', borderRadius: '4px',
+            padding: '6px 14px', cursor: 'pointer', fontSize: '13px', color: '#333',
+            display: 'flex', alignItems: 'center', gap: '6px',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+          }}
+        >
+          {currentProject ? currentProject.name : '📂 Проект'} ▾
+        </button>
+        {showProjectMenu && (
+          <div style={{
+            position: 'absolute', top: '100%', left: 0, marginTop: '4px',
+            background: '#fff', border: '1px solid #e0e0e0', borderRadius: '4px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)', minWidth: '260px', overflow: 'hidden',
+          }}>
+            {projects.map(p => (
+              <div key={p.id} onClick={() => handleProjectSwitch(p)} style={{
+                padding: '10px 14px', cursor: 'pointer',
+                borderBottom: '1px solid #f0f0f0',
+                background: currentProject?.id === p.id ? '#e6f7ff' : '#fff',
+                fontSize: '13px',
+              }}>
+                <div style={{ fontWeight: 'bold' }}>{p.name}</div>
+                {p.description && <div style={{ fontSize: '11px', color: '#999' }}>{p.description}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Tree */}
       <div style={{ flex: 1, position: 'relative' }}>
