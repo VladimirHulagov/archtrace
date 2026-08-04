@@ -258,3 +258,21 @@ export async function updateDecision(id: string, data: Partial<AdrInput> & { sta
   if (!res.ok) throw new Error('Failed to update decision');
   return res.json();
 }
+
+
+// ─── AI Analysis ──────────────────────────────────────────
+
+export async function startAnalysis(nodeId: string): Promise<{ status: string }> {
+  const res = await fetch(`${API_BASE}/decisions/${nodeId}/analyze`, {
+    method: 'POST',
+    headers: projectHeaders(),
+  });
+  if (!res.ok) throw new Error('Analysis failed to start');
+  return res.json();
+}
+
+export async function getAnalysisStatus(nodeId: string): Promise<{ analyzing: boolean; analysis: string | null; model?: string; created_at?: string }> {
+  const res = await fetch(`${API_BASE}/decisions/${nodeId}/analysis`, { headers: projectHeaders() });
+  if (!res.ok) return { analyzing: false, analysis: null };
+  return res.json();
+}

@@ -313,6 +313,26 @@ export async function updateCustomOption(
   return rows[0] || null;
 }
 
+
+
+// ─── AI Analysis ─────────────────────────────────────────
+
+export async function saveAnalysis(nodeId: string, projectId: number, analysis: string, model: string, createdBy?: number): Promise<any> {
+  const rows = await query(
+    `INSERT INTO ai_analyses (node_id, project_id, analysis, model, created_by)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [nodeId, projectId, analysis, model, createdBy || null]
+  );
+  return rows[0];
+}
+
+export async function getAnalysis(nodeId: string, projectId: number): Promise<any | null> {
+  const rows = await query(
+    `SELECT * FROM ai_analyses WHERE node_id = $1 AND project_id = $2 ORDER BY created_at DESC LIMIT 1`,
+    [nodeId, projectId]
+  );
+  return rows[0] || null;
+}
 // ─── Users API ───────────────────────────────────────────
 
 export async function getOrCreateUser(githubId: number, username: string, name: string | null, avatarUrl: string | null): Promise<User> {

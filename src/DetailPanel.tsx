@@ -8,6 +8,7 @@ import ReactMarkdown from 'react-markdown';
 import type { DecisionNode, Comment, Vote, CustomOption } from './api';
 import {
   postComment, deleteCommentApi, castVoteApi, removeVoteApi, addCustomOptionApi, updateCustomOptionApi,
+  startAnalysis, getAnalysisStatus,
   reactToComment,
 } from './api';
 
@@ -57,11 +58,15 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const [contextVersions, setContextVersions] = useState<string[]>([]);
   const [showContextHistory, setShowContextHistory] = useState(false);
   const [commentSort, setCommentSort] = useState<CommentSort>('date');
+  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [aiError, setAiError] = useState('');
   const [editingOptionLetter, setEditingOptionLetter] = useState<string | null>(null);
   const [editingOptionTitle, setEditingOptionTitle] = useState('');
 
   // ─── Resize logic ───────────────────────────────────────
   const isResizing = useRef(false);
+  const swipeStartX = useRef<number | null>(null);
 
   useEffect(() => {
     const handleMove = (e: MouseEvent) => {
@@ -179,6 +184,47 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     setEditingOptionLetter(null); setEditingOptionTitle('');
   }, [editingOptionTitle, detail, customOptions, onCustomOptionsChange]);
 
+  // ─── AI Analysis handler ────────────────────────────────
+
+  const analysisTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const pollAnalysis = useCallback(() => {
+    if (analysisTimer.current) clearTimeout(analysisTimer.current);
+    analysisTimer.current = setTimeout(async () => {
+      const status = await getAnalysisStatus(detail.id);
+      if (status.analyzing) {
+        pollAnalysis(); // keep polling
+      } else {
+        setAnalyzing(false);
+        if (status.analysis) setAiAnalysis(status.analysis);
+      }
+    }, 3000);
+  }, [detail.id]);
+
+  const handleAnalyze = useCallback(async () => {
+    setAnalyzing(true);
+    setAiError('');
+    try {
+      await startAnalysis(detail.id);
+      pollAnalysis();
+    } catch (err: any) {
+      setAiError(err.message);
+      setAnalyzing(false);
+    }
+  }, [detail, pollAnalysis]);
+
+  // Load existing analysis on mount
+  useEffect(() => {
+    setAiAnalysis(null);
+    setAiError('');
+    setAnalyzing(false);
+    getAnalysisStatus(detail.id).then(s => {
+      if (s.analyzing) { setAnalyzing(true); pollAnalysis(); }
+      else if (s.analysis) setAiAnalysis(s.analysis);
+    }).catch(() => {});
+    return () => { if (analysisTimer.current) clearTimeout(analysisTimer.current); };
+  }, [detail.id, pollAnalysis]);
+
   const handleSaveContext = useCallback(() => {
     const nv = [...contextVersions, editingContext];
     setContextVersions(nv);
@@ -209,7 +255,17 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
         }} />
       )}
 
-      <div style={containerStyle}>
+      <div
+        style={containerStyle}
+        onTouchStart={(e) => { swipeStartX.current = e.touches[0].clientX; }}
+        onTouchEnd={(e) => {
+          if (swipeStartX.current !== null) {
+            const dx = e.changedTouches[0].clientX - swipeStartX.current;
+            if (dx > 50) onClose();
+            swipeStartX.current = null;
+          }
+        }}
+      >
         {/* Resize handle */}
         {!isModal && (
           <div onMouseDown={startResize} style={{
@@ -402,6 +458,41 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               </div>
             </Section>
           )}
+
+          {/* ─── AI АНАЛИЗ ─────────────────────────────────── */}
+          <Section title="🔥 AI-анализ" accent="#fa541c">
+            {analyzing ? (
+              <div style={{ padding: '16px', textAlign: 'center', color: '#999', fontSize: '13px' }}>
+                <span style={{ fontSize: '20px' }}>🔥</span> Анализирую архитектуру...
+              </div>
+            ) : aiAnalysis ? (
+              <div>
+                <div style={{ fontSize: '12px', lineHeight: 1.6, color: '#333',
+                  background: '#fff7e6', padding: '10px', borderRadius: '4px',
+                  border: '1px solid #ffd591',
+                }}>
+                  <ReactMarkdown>{aiAnalysis}</ReactMarkdown>
+                </div>
+                <button onClick={handleAnalyze} style={{
+                  ...btnLink, marginTop: '6px', color: '#fa541c',
+                }}>🔄 Обновить анализ</button>
+              </div>
+            ) : (
+              <div>
+                {aiError && <div style={{ color: '#ff4d4f', fontSize: '11px', marginBottom: '6px' }}>{aiError}</div>}
+                <button onClick={handleAnalyze} style={{
+                  padding: '8px 16px', borderRadius: '4px', border: '1px solid #fa541c',
+                  background: '#fff', color: '#fa541c', cursor: 'pointer',
+                  fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px',
+                }}>
+                  🔥 Прожарить
+                </button>
+                <div style={{ fontSize: '11px', color: '#999', marginTop: '4px' }}>
+                  Анализ покрытия требований и архитектурных противоречий
+                </div>
+              </div>
+            )}
+          </Section>
 
           {/* КОММЕНТАРИИ с лайками и сортировкой */}
           <Section title={`Комментарии (${comments.length})`} accent="#8c8c8c">

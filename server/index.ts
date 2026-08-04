@@ -15,6 +15,7 @@ import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { buildGraph, tallyVotes, generateAdrMarkdown, type DecisionNode } from './parse.js';
 import { loadConfig, saveConfig, type ArchTraceConfig } from './config.js';
+import { runArchitecturalAnalysis } from './ai-analysis.js';
 import { syncRepo, isRepoReady, getActiveDecisionsDir, pushChanges } from './git-sync.js';
 import {
   getComments, addComment, deleteComment,
@@ -25,6 +26,7 @@ import {
   getOrCreateUser, getUserById, getProjects,
   checkDb,
   query,
+  saveAnalysis, getAnalysis,
 } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -510,6 +512,77 @@ app.put('/api/decisions/:id', async (req, res) => {
     } else {
       res.json({ id: node.id, message: 'saved locally (no git repo)' });
     }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// Track in-progress analyses
+const analyzingNodes = new Set<string>();
+
+/**
+ * POST /api/decisions/:id/analyze
+ * Start AI analysis async — returns 202, result available via GET.
+ */
+app.post('/api/decisions/:id/analyze', async (req, res) => {
+  try {
+    const projectId = getProjectId(req);
+    const dir = await projectDecisionsDir(projectId);
+    const graph = buildGraph(dir);
+    const node = graph.nodes.find(n => n.id === req.params.id);
+    if (!node) return res.status(404).json({ error: 'Decision not found' });
+
+    const nodeKey = `${projectId}:${req.params.id}`;
+    if (analyzingNodes.has(nodeKey)) {
+      return res.status(202).json({ status: 'already_running' });
+    }
+    analyzingNodes.add(nodeKey);
+
+    // Run in background
+    (async () => {
+      try {
+        let parentTitle: string | undefined;
+        let parentBody: string | undefined;
+        if (node.parent) {
+          const parent = graph.nodes.find(n => n.id === node.parent);
+          if (parent) { parentTitle = parent.title; parentBody = parent.body; }
+        }
+        const children = graph.nodes.filter(n => n.parent === node.id);
+
+        const result = await runArchitecturalAnalysis({
+          adrId: node.id,
+          adrTitle: node.title,
+          adrBody: node.body,
+          parentTitle, parentBody,
+          childrenTitles: children.map(c => c.title),
+          options: node.options || [],
+        });
+
+        await saveAnalysis(node.id, projectId, result.analysis, result.model);
+      } catch (err) {
+        console.error(`Analysis failed for ${nodeKey}:`, err);
+      } finally {
+        analyzingNodes.delete(nodeKey);
+      }
+    })();
+
+    res.status(202).json({ status: 'started' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/decisions/:id/analysis
+ */
+app.get('/api/decisions/:id/analysis', async (req, res) => {
+  try {
+    const projectId = getProjectId(req);
+    const nodeKey = `${projectId}:${req.params.id}`;
+    const isAnalyzing = analyzingNodes.has(nodeKey);
+    const analysis = await getAnalysis(req.params.id, projectId);
+    res.json({ analyzing: isAnalyzing, analysis: analysis?.analysis || null, model: analysis?.model, created_at: analysis?.created_at });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

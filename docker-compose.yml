@@ -14,13 +14,21 @@ services:
       - ./vitest.config.ts:/app/vitest.config.ts
       - ./tsconfig.json:/app/tsconfig.json
       - ./tsconfig.node.json:/app/tsconfig.node.json
-      # Persistent git-data clone (survives container restarts)
+      - ./package.json:/app/package.json:ro
+      - ./package-lock.json:/app/package-lock.json:ro
+      # Persistent git-data clones (survives container restarts)
       - archtrace-git-data:/app/git-data
-      # Config file (persisted)
-      - archtrace-config:/app/archtrace-config
+      - archtrace-git-data-2:/app/git-data-2
     environment:
       - CHOKIDAR_USEPOLLING=true
       - PORT=3001
+      # Database (container-to-container on traefik-public network)
+      - DATABASE_URL=postgresql://archtrace:archtrace_dev_2026@archtrace-db:5432/archtrace
+      # LLM API for AI architectural analysis
+      - ZAI_API_KEY=${ZAI_API_KEY}
+      # Git credentials for ADR repo push
+      - GIT_AUTHOR_NAME=ArchTrace
+      - GIT_AUTHOR_EMAIL=archtrace@bots.collaborationism.tech
     labels:
       docker-guard.allow: "true"
       traefik.enable: "true"
@@ -28,12 +36,30 @@ services:
       traefik.http.routers.archtrace.entrypoints: websecure
       traefik.http.routers.archtrace.tls.certresolver: myresolver
       traefik.http.services.archtrace.loadbalancer.server.port: "5233"
+    depends_on:
+      - archtrace-db
+    networks:
+      - traefik-public
+
+  archtrace-db:
+    image: postgres:16-alpine
+    container_name: archtrace-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=archtrace
+      - POSTGRES_USER=archtrace
+      - POSTGRES_PASSWORD=archtrace_dev_2026
+    volumes:
+      - archtrace-pgdata:/var/lib/postgresql/data
+    labels:
+      docker-guard.allow: "true"
     networks:
       - traefik-public
 
 volumes:
   archtrace-git-data:
-  archtrace-config:
+  archtrace-git-data-2:
+  archtrace-pgdata:
 
 networks:
   traefik-public:
