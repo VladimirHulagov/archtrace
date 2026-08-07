@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
+import { TransformWrapper, TransformComponent, useTransformComponent } from 'react-zoom-pan-pinch';
 import { TreeNode, SimpleTreeProps } from './types';
 import { TreeNodeComponent } from './TreeNode';
 import { Connection as ConnectionComponent, resetLanes } from './Connection';
@@ -17,6 +17,52 @@ export interface TreeProps extends SimpleTreeProps {
 }
 
 // Edge points are computed by dagre and passed via edgePoints prop
+
+
+// ─── Phase labels overlay (tracks transform to pin labels to left edge) ───
+const PhaseLabelsOverlay: React.FC<{ phaseBands: any[] }> = ({ phaseBands }) => {
+  // Subscribe to transform state — re-renders on pan/zoom
+  const transform = useTransformComponent((state) => ({
+    scale: state.state.scale,
+    positionX: state.state.positionX,
+    positionY: state.state.positionY,
+  }));
+
+  const viewportH = window.innerHeight;
+
+  return (
+    <>
+      {phaseBands.map((band: any) => {
+        // band.y is canvas coordinate; apply transform to get screen Y
+        const screenY = band.y * transform.scale + transform.positionY;
+        const bandScreenH = band.height * transform.scale;
+        // Is the band line (top border) visible on screen?
+        const lineVisible = screenY > -10 && screenY < viewportH;
+        // Clamp label to viewport: top edge of band, but at least 4px from top
+        const labelY = Math.max(4, Math.min(viewportH - 20, screenY + 4));
+        if (!lineVisible) return null;
+        return (
+          <div key={`label-${band.phase}`} style={{
+            position: 'absolute',
+            left: '8px',
+            top: `${labelY}px`,
+            fontSize: '12px',
+            fontWeight: 700,
+            color: band.color,
+            opacity: 0.7,
+            textTransform: 'uppercase',
+            letterSpacing: '0.5px',
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
+            zIndex: 50,
+          }}>
+            {band.name}
+          </div>
+        );
+      })}
+    </>
+  );
+};
 
 export const Tree: React.FC<TreeProps> = ({
   nodes,
@@ -456,7 +502,7 @@ export const Tree: React.FC<TreeProps> = ({
               }
             }}
           />
-          {/* Phase background bands */}
+          {/* Phase background bands (no labels — rendered as overlay outside) */}
           {phaseBands && phaseBands.length > 0 && (
             <>
               {phaseBands.map((band: any) => (
@@ -470,25 +516,7 @@ export const Tree: React.FC<TreeProps> = ({
                   borderTop: `1px solid ${band.color}`,
                   pointerEvents: 'none',
                   zIndex: 0,
-                }}>
-                  <div style={{
-                    position: 'sticky',
-                    left: '8px',
-                    top: '6px',
-                    width: 'fit-content',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    color: band.color,
-                    opacity: 0.7,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                    whiteSpace: 'nowrap',
-                    pointerEvents: 'none',
-                    zIndex: 1,
-                  }}>
-                    {band.name}
-                  </div>
-                </div>
+                }} />
               ))}
             </>
           )}
@@ -549,6 +577,11 @@ export const Tree: React.FC<TreeProps> = ({
           ))}
         </TransformComponent>
       </TransformWrapper>
+      
+      {/* Phase labels pinned to left edge of screen */}
+      {phaseBands && phaseBands.length > 0 && (
+        <PhaseLabelsOverlay phaseBands={phaseBands} />
+      )}
       
       <Controls
         selectedNodeId={selectedNodeId}
