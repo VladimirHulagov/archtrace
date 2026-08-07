@@ -584,37 +584,47 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             ) : (
               <>
                 <button onClick={() => setShowAddOption(true)} style={{ ...btnLink, marginBottom: '8px' }}>+ Добавить вариант</button>
-            {suggestingSection === null && suggestedContent && (
-              <div style={{ marginTop: '8px', padding: '8px', background: '#f0f5ff', borderRadius: '4px', border: '1px solid #adc6ff' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#2f54eb' }}>🪄 AI-варианты:</span>
-                  <button onClick={() => setSuggestedContent('')} style={{ border: '1px solid #d0d0d0', background: '#fff', color: '#666', borderRadius: '3px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}>Закрыть</button>
-                </div>
-                <div style={{ fontSize: '12px', color: '#333', lineHeight: 1.5, marginBottom: '6px' }}>
-                  <ReactMarkdown>{suggestedContent}</ReactMarkdown>
-                </div>
-                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                  {(suggestedContent.match(/Option [A-Z]/g) || []).map((match, i) => {
-                    const letter = match.match(/([A-Z])/)?.[1] || String.fromCharCode(65 + i);
-                    // Extract title from "### Option X: Title"
-                    const titleMatch = suggestedContent.match(new RegExp(`Option ${letter}[:\\s]*([^\\n#]+)`));
-                    const title = titleMatch ? titleMatch[1].trim() : match;
-                    return (
-                      <button key={i} onClick={async () => {
-                        const usedLetters = new Set(allOptions.map(o => o.letter));
-                        let nextLetter = '';
-                        for (let j = 65; j <= 90; j++) { const l = String.fromCharCode(j); if (!usedLetters.has(l)) { nextLetter = l; break; } }
-                        if (!nextLetter) nextLetter = String.fromCharCode(65 + allOptions.length);
-                        try {
-                          const opt = await addCustomOptionApi(detail.id, nextLetter, title);
-                          onCustomOptionsChange([...customOptions, opt]);
-                        } catch (err) { console.error('Add AI option:', err); }
-                      }} style={{ border: '1px solid #52c41a', background: '#f6ffed', color: '#389e0d', borderRadius: '3px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}>
-                        + {title.substring(0, 30)}
-                      </button>
-                    );
-                  })}
-                </div>
+            {(suggestingSection === 'options' || (suggestingSection === null && suggestedContent)) && (
+              <div style={{ marginTop: '8px', padding: '10px', background: '#f0f5ff', borderRadius: '4px', border: '1px solid #adc6ff' }}>
+                {suggestingSection === 'options' ? (
+                  <div style={{ textAlign: 'center', color: '#2f54eb', fontSize: '12px' }}>
+                    <span style={{ fontSize: '16px' }}>🪄</span> AI генерирует варианты...
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#2f54eb' }}>🪄 AI-варианты:</span>
+                      <button onClick={() => setSuggestedContent('')} style={{ border: '1px solid #d0d0d0', background: '#fff', color: '#666', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}>Отклонить</button>
+                    </div>
+                    {(() => {
+                      const lines = suggestedContent.split('\n').map((l: string) => l.trim()).filter((l: string) => l.match(/^[-*]/)).map((l: string) => l.replace(/^[-*]\s+/, '').trim()).filter((l: string) => l.length > 2);
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {lines.map((title: string, i: number) => (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ flex: 1, fontSize: '12px', color: '#333' }}>{title}</span>
+                              <button onClick={async () => {
+                                const usedLetters = new Set(allOptions.map(o => o.letter));
+                                let nextLetter = '';
+                                for (let j = 65; j <= 90; j++) { const l = String.fromCharCode(j); if (!usedLetters.has(l)) { nextLetter = l; break; } }
+                                if (!nextLetter) nextLetter = String.fromCharCode(65 + allOptions.length);
+                                try {
+                                  const opt = await addCustomOptionApi(detail.id, nextLetter, title);
+                                  onCustomOptionsChange([...customOptions, opt]);
+                                } catch (err) { console.error('Add AI option:', err); }
+                              }} style={{ border: '1px solid #52c41a', background: '#f6ffed', color: '#389e0d', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                + Добавить
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </>
+                )}
+                {suggestError && suggestingSection === null && (
+                  <div style={{ color: '#ff4d4f', fontSize: '11px', marginTop: '4px' }}>{suggestError}</div>
+                )}
               </div>
             )}
             </>
