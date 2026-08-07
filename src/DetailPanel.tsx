@@ -213,17 +213,12 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     try {
       const result = await suggestSection(detail.id, section);
       setSuggestedContent(result.content);
-      // Enter edit mode for the section
-      if (section === 'context') {
-        setEditingContext(sections.context || '');
-        setIsEditingContext(true);
-      }
     } catch (err: any) {
-      setSuggestError(err.message);
+      setSuggestError(err.message || 'Ошибка AI');
     } finally {
       setSuggestingSection(null);
     }
-  }, [detail.id, sections.context]);
+  }, [detail.id]);
 
   // ─── Title edit handler ────────────────────────────────
 
@@ -293,6 +288,20 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     }).catch(() => {});
     return () => { if (analysisTimer.current) clearTimeout(analysisTimer.current); };
   }, [detail.id, pollAnalysis]);
+
+  const handleApplySuggestion = useCallback(async (section: 'context' | 'options' | 'consequences') => {
+    if (!suggestedContent) return;
+    try {
+      if (section === 'context') {
+        const existing = sections.context || '';
+        const merged = existing ? existing + '\n\n' + suggestedContent : suggestedContent;
+        await updateDecision(detail.id, { context: merged });
+        // Update local state
+        sections.context = merged;
+      }
+      setSuggestedContent('');
+    } catch (err) { console.error('Apply suggestion error:', err); }
+  }, [suggestedContent, detail.id, sections]);
 
   const handleSaveContext = useCallback(async () => {
     try {
@@ -448,23 +457,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                   <button onClick={() => setIsEditingContext(false)} style={btnSecondary}>Отмена</button>
                   <span style={{ fontSize: '10px', color: '#999', marginLeft: '4px' }}>Ctrl+Enter — быстрое сохранение</span>
                 </div>
-                {suggestingSection === null && suggestedContent && (
-                  <div style={{ marginTop: '8px', padding: '8px', background: '#f0f5ff', borderRadius: '4px', border: '1px solid #adc6ff' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#2f54eb' }}>🪄 AI-предложение:</span>
-                      <div style={{ display: 'flex', gap: '4px' }}>
-                        <button onClick={() => { setEditingContext(prev => (prev ? prev + '\n\n' : '') + suggestedContent); }} style={{ border: '1px solid #52c41a', background: '#f6ffed', color: '#389e0d', borderRadius: '3px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}>+ Добавить</button>
-                        <button onClick={() => setSuggestedContent('')} style={{ border: '1px solid #d0d0d0', background: '#fff', color: '#666', borderRadius: '3px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}>Отклонить</button>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: '12px', color: '#333', lineHeight: 1.5 }}>
-                      <ReactMarkdown>{suggestedContent}</ReactMarkdown>
-                    </div>
-                  </div>
-                )}
-                {suggestError && suggestingSection === null && (
-                  <div style={{ color: '#ff4d4f', fontSize: '11px', marginTop: '4px' }}>{suggestError}</div>
-                )}
               </div>
             ) : (
               <div>
@@ -477,6 +469,31 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                     <button onClick={() => setShowContextHistory(!showContextHistory)} style={btnLink}>📜 Версии ({contextVersions.length})</button>
                   )}
                 </div>
+                {(suggestingSection === 'context' || (suggestingSection === null && suggestedContent)) && (
+                  <div style={{ marginTop: '8px', padding: '10px', background: '#f0f5ff', borderRadius: '4px', border: '1px solid #adc6ff' }}>
+                    {suggestingSection === 'context' ? (
+                      <div style={{ textAlign: 'center', color: '#2f54eb', fontSize: '12px' }}>
+                        <span style={{ fontSize: '16px' }}>🪄</span> AI генерирует дополнения...
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#2f54eb' }}>🪄 AI дополнение:</span>
+                          <div style={{ display: 'flex', gap: '4px' }}>
+                            <button onClick={() => handleApplySuggestion('context')} style={{ border: '1px solid #52c41a', background: '#f6ffed', color: '#389e0d', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}>+ Добавить</button>
+                            <button onClick={() => setSuggestedContent('')} style={{ border: '1px solid #d0d0d0', background: '#fff', color: '#666', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}>Отклонить</button>
+                          </div>
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#333', lineHeight: 1.5 }}>
+                          <ReactMarkdown>{suggestedContent}</ReactMarkdown>
+                        </div>
+                      </>
+                    )}
+                    {suggestError && suggestingSection === null && (
+                      <div style={{ color: '#ff4d4f', fontSize: '11px', marginTop: '4px' }}>{suggestError}</div>
+                    )}
+                  </div>
+                )}
                 {showContextHistory && contextVersions.map((v, i) => (
                   <div key={i} style={{ marginTop: '6px', padding: '8px', background: '#f5f5f5', borderRadius: '4px', fontSize: '12px', borderLeft: '3px solid #1890ff' }}>
                     <div style={{ color: '#999', marginBottom: '4px' }}>Версия {contextVersions.length - i}</div>
