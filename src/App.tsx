@@ -65,6 +65,7 @@ function App() {
   const [detailAsModal, setDetailAsModal] = useState(false);
   const [showPatModal, setShowPatModal] = useState(false);
   const [hasGithubToken, setHasGithubToken] = useState(false);
+  const [gitSyncStatus, setGitSyncStatus] = useState<'synced' | 'pending' | 'error' | 'none'>('none');
   const [pendingNewNode, setPendingNewNode] = useState<TreeNode | null>(null);
   const [showRepoSetup, setShowRepoSetup] = useState(false);
   const [repoSetupProject, setRepoSetupProject] = useState<Project | null>(null);
@@ -94,7 +95,10 @@ function App() {
     setConnections(treeConnections);
     setEdgePoints(ePoints);
     setPhaseBands(pBands);
-    fetchGitInfo().then(setGitInfo).catch(() => {});
+    fetchGitInfo().then(info => {
+      setGitInfo(info);
+      setGitSyncStatus(info.commitHash ? 'synced' : 'none');
+    }).catch(() => { setGitSyncStatus('error'); });
   }, [currentProject]);
 
   const handleSync = useCallback(async () => {
@@ -110,6 +114,8 @@ function App() {
       setShowSyncBanner(true);
       setTimeout(() => setShowSyncBanner(false), 5000);
     } finally { setSyncing(false); }
+    // Refresh git info after sync
+    fetchGitInfo().then(info => { setGitInfo(info); setGitSyncStatus(info.commitHash ? 'synced' : 'none'); }).catch(() => {});
   }, [reloadGraph]);
 
   // Create empty node and open editor modal
@@ -183,9 +189,14 @@ function App() {
       const treeConnections = graph.connections.map(c => ({ id: c.id, from: c.from, to: c.to, kind: c.kind }));
       const { nodes: positioned, edgePoints: ePoints, phaseBands: pBands } = calculateLayout(treeNodes, treeConnections, window.innerWidth);
       setNodes(positioned); setConnections(treeConnections); setEdgePoints(ePoints); setPhaseBands(pBands);
+      fetchGitInfo().then(info => {
+        setGitInfo(info);
+        setGitSyncStatus(info.commitHash ? 'synced' : 'none');
+      }).catch(() => { setGitInfo({ commitHash: null, repoUrl: null, prevHash: null }); setGitSyncStatus('error'); });
     } catch (err) {
       // If fails, show empty tree
       setNodes([]); setConnections([]); setEdgePoints(new Map()); setPhaseBands([]);
+      setGitInfo({ commitHash: null, repoUrl: null, prevHash: null });
     }
   }, []);
 
@@ -371,14 +382,20 @@ function App() {
               target="_blank"
               rel="noopener noreferrer"
               style={{
-                padding: '6px 12px', borderRadius: '6px', border: '1px solid #d0d0d0',
-                background: '#fff', cursor: 'pointer',
-                fontSize: '12px', color: '#1890ff', fontFamily: 'monospace',
+                padding: '6px 12px', borderRadius: '6px',
+                border: gitSyncStatus === 'synced' ? '1px solid #b7eb8f' : '1px solid #d0d0d0',
+                background: gitSyncStatus === 'synced' ? '#f6ffed' : '#fff',
+                cursor: 'pointer',
+                fontSize: '12px',
+                color: gitSyncStatus === 'synced' ? '#389e0d' : '#1890ff',
+                fontFamily: 'monospace',
                 textDecoration: 'none',
                 boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+                display: 'flex', alignItems: 'center', gap: '4px',
               }}
-              title="Текущий коммит"
+              title={gitSyncStatus === 'synced' ? 'Синхронизировано с Git' : 'Текущий коммит'}
             >
+              {gitSyncStatus === 'synced' ? '✅' : ''}
               {gitInfo.commitHash}
             </a>
             <button
