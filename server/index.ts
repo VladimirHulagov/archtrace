@@ -178,6 +178,105 @@ app.get('/api/sync/status', (_req, res) => {
   }
 });
 
+// ─── Git Info Routes ─────────────────────────────────────
+
+/**
+ * GET /api/git-info
+ * Returns current commit hash, repo URL, and previous commit hash.
+ */
+app.get('/api/git-info', async (req, res) => {
+  try {
+    const projectId = getProjectId(req);
+    const { getProject } = await import('./db.js');
+    const project = await getProject(projectId);
+    
+    if (!project?.git_repo_url) {
+      return res.json({ commitHash: null, repoUrl: null, prevHash: null });
+    }
+
+    const cloneDir = path.resolve(__dirname, '..', `git-data-${projectId}`);
+    const commitHash = execSync('git rev-parse --short HEAD', {
+      cwd: cloneDir, encoding: 'utf-8',
+    }).trim();
+    
+    // Get repo URL for link (strip .git, convert to HTTPS)
+    let repoUrl = project.git_repo_url.replace(/\.git$/, '');
+    if (repoUrl.startsWith('git@')) {
+      repoUrl = repoUrl.replace('git@github.com:', 'https://github.com/');
+    }
+
+    // Get previous commit
+    let prevHash: string | null = null;
+    try {
+      prevHash = execSync('git rev-parse --short HEAD~1', {
+        cwd: cloneDir, encoding: 'utf-8',
+      }).trim();
+    } catch { prevHash = null; }
+
+    res.json({ commitHash, repoUrl, prevHash });
+  } catch (err: any) {
+    res.json({ commitHash: null, repoUrl: null, prevHash: null });
+  }
+});
+
+/**
+ * POST /api/git-revert
+ * Reverts to previous commit (git reset --hard HEAD~1) and pushes.
+ */
+app.post('/api/git-revert', async (req, res) => {
+  try {
+    const projectId = getProjectId(req);
+    const { getProject } = await import('./db.js');
+    const project = await getProject(projectId);
+    
+    if (!project?.git_repo_url) {
+      return res.status(400).json({ error: 'No git repo for this project' });
+    }
+
+    const cloneDir = path.resolve(__dirname, '..', `git-data-${projectId}`);
+    
+    // Check if there's a previous commit
+    try {
+      execSync('git rev-parse HEAD~1', { cwd: cloneDir, encoding: 'utf-8', stdio: 'pipe' });
+    } catch {
+      return res.status(400).json({ error: 'No previous commit to revert to' });
+    }
+
+    const oldHash = execSync('git rev-parse --short HEAD', {
+      cwd: cloneDir, encoding: 'utf-8',
+    }).trim();
+    
+    // Reset to previous commit
+    execSync('git reset --hard HEAD~1', { cwd: cloneDir, stdio: 'pipe', timeout: 10000 });
+    
+    const newHash = execSync('git rev-parse --short HEAD', {
+      cwd: cloneDir, encoding: 'utf-8',
+    }).trim();
+
+    // Force push
+    const branch = project.git_branch || 'main';
+    try {
+      execSync(`git push --force origin ${branch}`, {
+        cwd: cloneDir, stdio: 'pipe', timeout: 30000,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      });
+    } catch (pushErr: any) {
+      // Push failed but local is reset
+    }
+
+    // Invalidate cache
+    projectDirCache.delete(projectId);
+
+    res.json({ 
+      success: true, 
+      message: `Reverted ${oldHash} → ${newHash}`,
+      commitHash: newHash,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Graph and Decision Routes ───────────────────────────
 
 app.get('/api/graph', async (req, res) => {

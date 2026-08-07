@@ -10,6 +10,7 @@ import {
   createDecision, updateDecision,
 } from './api';
 import { calculateLayout } from './SimpleTree/utils/positions';
+import { fetchGitInfo, revertGit } from './api';
 import type { Point } from './SimpleTree/types';
 import ReactMarkdown from 'react-markdown';
 import { DetailPanel } from './DetailPanel';
@@ -58,6 +59,8 @@ function App() {
   const [currentUser, setCurrentUser] = useState<{ id: number; username: string; role: string } | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [gitInfo, setGitInfo] = useState<{ commitHash: string | null; repoUrl: string | null; prevHash: string | null }>({ commitHash: null, repoUrl: null, prevHash: null });
+  const [reverting, setReverting] = useState(false);
   const [pendingNewNode, setPendingNewNode] = useState<TreeNode | null>(null);
   const [showRepoSetup, setShowRepoSetup] = useState(false);
   const [repoSetupProject, setRepoSetupProject] = useState<Project | null>(null);
@@ -87,6 +90,7 @@ function App() {
     setConnections(treeConnections);
     setEdgePoints(ePoints);
     setPhaseBands(pBands);
+    fetchGitInfo().then(setGitInfo).catch(() => {});
   }, [currentProject]);
 
   const handleSync = useCallback(async () => {
@@ -270,6 +274,21 @@ function App() {
     }
   }, [currentProject, selectedDetail]);
 
+  // DEL key deletes selected card
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDetail) {
+        // Don't interfere with input/textarea
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+        e.preventDefault();
+        handleDeleteNode(selectedDetail.id);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedDetail]);
+
   const handleNodeClick = useCallback((node: TreeNode) => {
     fetch(`/api/decisions/${node.id}?projectId=${currentProject?.id || 1}`).then(r => r.json()).then(data => {
       setSelectedDetail(data);
@@ -335,20 +354,58 @@ function App() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', position: 'relative' }}>
-      {/* New decision button — bottom-left */}
-      <button
-        onClick={handleCreateAndEdit}
-        style={{
-          position: 'fixed', bottom: '16px', left: '90px', zIndex: 1000,
-          padding: '6px 14px', borderRadius: '6px', border: '1px solid #1890ff',
-          background: '#1890ff', cursor: 'pointer',
-          fontSize: '12px', color: '#fff', fontWeight: 'bold',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
-        }}
-        title="Создать новое решение"
-      >
-        + Решение
-      </button>
+      {/* Git commit hash + revert — bottom-left, replaces +Решение */}
+      <div style={{
+        position: 'fixed', bottom: '16px', left: '90px', zIndex: 1000,
+        display: 'flex', alignItems: 'center', gap: '6px',
+      }}>
+        {gitInfo.commitHash ? (
+          <>
+            <a
+              href={gitInfo.repoUrl ? `${gitInfo.repoUrl}/commit/${gitInfo.commitHash}` : '#'}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                padding: '6px 12px', borderRadius: '6px', border: '1px solid #d0d0d0',
+                background: '#fff', cursor: 'pointer',
+                fontSize: '12px', color: '#1890ff', fontFamily: 'monospace',
+                textDecoration: 'none',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+              }}
+              title="Текущий коммит"
+            >
+              {gitInfo.commitHash}
+            </a>
+            <button
+              onClick={async () => {
+                if (!gitInfo.prevHash) return;
+                if (!confirm(`Вернуться к предыдущему коммиту?\n${gitInfo.commitHash} → ${gitInfo.prevHash}`)) return;
+                setReverting(true);
+                try {
+                  await revertGit();
+                  await reloadGraph();
+                } catch (err) { console.error('Revert failed:', err); }
+                setReverting(false);
+              }}
+              disabled={reverting || !gitInfo.prevHash}
+              style={{
+                padding: '6px 10px', borderRadius: '6px', border: '1px solid #d0d0d0',
+                background: reverting ? '#f0f0f0' : '#fff', cursor: reverting || !gitInfo.prevHash ? 'not-allowed' : 'pointer',
+                fontSize: '12px', color: gitInfo.prevHash ? '#666' : '#ccc',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+              }}
+              title={gitInfo.prevHash ? `Вернуться к ${gitInfo.prevHash}` : 'Нет предыдущего коммита'}
+            >
+              {reverting ? '⟳...' : '←'}
+            </button>
+          </>
+        ) : (
+          <span style={{
+            padding: '6px 12px', borderRadius: '6px', border: '1px solid #e0e0e0',
+            background: '#fafafa', fontSize: '12px', color: '#999',
+          }}>нет git</span>
+        )}
+      </div>
 
       {/* Sync button — bottom-left, away from panel controls */}
       <button onClick={handleSync} disabled={syncing} style={{

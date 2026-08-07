@@ -272,6 +272,29 @@ export async function updateDecision(id: string, data: Partial<AdrInput> & { sta
 }
 
 
+// ─── Git Info ────────────────────────────────────────────
+
+export interface GitInfo {
+  commitHash: string | null;
+  repoUrl: string | null;
+  prevHash: string | null;
+}
+
+export async function fetchGitInfo(): Promise<GitInfo> {
+  const res = await fetch(`${API_BASE}/git-info`, { headers: projectHeaders() });
+  if (!res.ok) return { commitHash: null, repoUrl: null, prevHash: null };
+  return res.json();
+}
+
+export async function revertGit(): Promise<{ success: boolean; message: string; commitHash: string }> {
+  const res = await fetch(`${API_BASE}/git-revert`, {
+    method: 'POST',
+    headers: jsonHeaders(),
+  });
+  if (!res.ok) throw new Error('Revert failed');
+  return res.json();
+}
+
 // ─── AI Analysis ──────────────────────────────────────────
 
 export async function startAnalysis(nodeId: string): Promise<{ status: string }> {
