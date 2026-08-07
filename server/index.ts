@@ -204,17 +204,26 @@ app.get('/api/git-info', async (req, res) => {
       return res.json({ commitHash: null, repoUrl: null, prevHash: null });
     }
 
-    const cloneDir = path.resolve(__dirname, '..', `git-data-${projectId}`);
-    const commitHash = execSync('git rev-parse --short HEAD', {
-      cwd: cloneDir, encoding: 'utf-8',
-    }).trim();
-    
     // Get repo URL for link (strip .git, convert to HTTPS)
     let repoUrl = project.git_repo_url.replace(/\.git$/, '');
     if (repoUrl.startsWith('git@')) {
       repoUrl = repoUrl.replace('git@github.com:', 'https://github.com/');
     }
 
+    // Project 1 uses git-data (via git-sync.ts), others use git-data-<id>
+    const cloneDir = projectId === 1
+      ? path.resolve(__dirname, '..', 'git-data')
+      : path.resolve(__dirname, '..', `git-data-${projectId}`);
+    
+    // Check if dir exists and has .git
+    if (!fs.existsSync(path.join(cloneDir, '.git'))) {
+      return res.json({ commitHash: null, repoUrl: repoUrl, prevHash: null });
+    }
+    
+    const commitHash = execSync('git rev-parse --short HEAD', {
+      cwd: cloneDir, encoding: 'utf-8',
+    }).trim();
+    
     // Get previous commit
     let prevHash: string | null = null;
     try {
