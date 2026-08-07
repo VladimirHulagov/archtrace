@@ -31,7 +31,7 @@ const PhaseLabelsOverlay: React.FC<{ phaseBands: any[] }> = ({ phaseBands }) => 
   const viewportH = window.innerHeight;
 
   return (
-    <>
+    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 50, overflow: 'hidden' }}>
       {phaseBands.map((band: any) => {
         // band.y is canvas coordinate; apply transform to get screen Y
         const screenY = band.y * transform.scale + transform.positionY;
@@ -60,7 +60,7 @@ const PhaseLabelsOverlay: React.FC<{ phaseBands: any[] }> = ({ phaseBands }) => 
           </div>
         );
       })}
-    </>
+    </div>
   );
 };
 
@@ -153,14 +153,12 @@ export const Tree: React.FC<TreeProps> = ({
 
   const handleNodeDoubleClick = useCallback(
     (node: TreeNode) => {
-      setEditingNode(node);
-      announce(`Editing node ${node.text}`);
-      
-      if (onNodeDoubleClick) {
-        onNodeDoubleClick(node);
+      // Double-click opens detail panel
+      if (onNodeClick) {
+        onNodeClick(node);
       }
     },
-    [onNodeDoubleClick, announce]
+    [onNodeClick]
   );
 
   const handleNodeDrag = useCallback(
@@ -488,6 +486,9 @@ export const Tree: React.FC<TreeProps> = ({
         doubleClick={{ mode: 'reset' }}
         panning={{ velocityDisabled: true }}
       >
+        {phaseBands && phaseBands.length > 0 && (
+          <PhaseLabelsOverlay phaseBands={phaseBands} />
+        )}
         <TransformComponent
           wrapperClass={styles.transformWrapper}
           contentClass={styles.transformContent}
@@ -578,11 +579,6 @@ export const Tree: React.FC<TreeProps> = ({
         </TransformComponent>
       </TransformWrapper>
       
-      {/* Phase labels pinned to left edge of screen */}
-      {phaseBands && phaseBands.length > 0 && (
-        <PhaseLabelsOverlay phaseBands={phaseBands} />
-      )}
-      
       <Controls
         selectedNodeId={selectedNodeId}
         selectedConnectionId={selectedConnectionId}
@@ -598,14 +594,7 @@ export const Tree: React.FC<TreeProps> = ({
         onZoomReset={() => transformRef.current?.resetTransform()}
       />
       
-      {editingNode && (
-        <Modal
-          node={editingNode}
-          isOpen={!!editingNode}
-          onSave={handleModalSave}
-          onCancel={handleModalCancel}
-        />
-      )}
+
     </div>
   );
 };

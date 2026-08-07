@@ -169,21 +169,6 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
                 aria-label={`Status: ${node.status}`}
               />
             )}
-            {onDeleteNode && !node.id.startsWith('new-') && (
-              <span
-                onClick={(e) => { e.stopPropagation(); onDeleteNode(node.id); }}
-                style={{
-                  cursor: 'pointer', color: '#cc4444', fontSize: '12px',
-                  padding: '0 2px', marginLeft: '2px', flexShrink: 0,
-                  opacity: 0.6,
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; }}
-                title="Удалить карточку"
-                role="button"
-                aria-label="Удалить карточку"
-              >🗑</span>
-            )}
           </div>
 
           {/* Option list */}

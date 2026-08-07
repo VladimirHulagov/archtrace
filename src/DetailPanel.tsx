@@ -42,12 +42,13 @@ export interface DetailPanelProps {
   onVotesChange: (v: Vote[]) => void;
   onCustomOptionsChange: (o: CustomOption[]) => void;
   onClose: () => void;
+  onDeleteNode?: () => void;
 }
 
 export const DetailPanel: React.FC<DetailPanelProps> = ({
   detail, comments, votes, customOptions,
   currentUserId, currentRole,
-  onCommentsChange, onVotesChange, onCustomOptionsChange, onClose,
+  onCommentsChange, onVotesChange, onCustomOptionsChange, onClose, onDeleteNode,
 }) => {
   const [mode, setMode] = useState<PanelMode>('sidebar');
   const [width, setWidth] = useState(420);
@@ -330,6 +331,16 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             {STATUS_ICONS[detail.status] || '📄'} ADR-{detail.id}
           </h2>
           <div style={{ display: 'flex', gap: '8px' }}>
+            {onDeleteNode && (
+              <button
+                onClick={() => { if (confirm('Удалить карточку?')) onDeleteNode(); }}
+                title="Удалить карточку"
+                style={{
+                  border: '1px solid #ffccc7', background: '#fff', borderRadius: '4px',
+                  padding: '5px 10px', cursor: 'pointer', fontSize: '14px', color: '#cc4444',
+                }}
+              >🗑</button>
+            )}
             <button
               onClick={() => setMode(m => m === 'sidebar' ? 'modal' : 'sidebar')}
               title={isModal ? 'Свернуть в панель' : 'Развернуть'}

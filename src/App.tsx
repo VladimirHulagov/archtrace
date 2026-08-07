@@ -474,6 +474,9 @@ function App() {
           onVotesChange={setVotes}
           onCustomOptionsChange={setCustomOptions}
           onClose={() => setSelectedDetail(null)}
+          onDeleteNode={() => {
+            if (selectedDetail) handleDeleteNode(selectedDetail.id);
+          }}
         />
       )}
       {/* Repo Setup Modal */}
