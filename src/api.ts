@@ -112,6 +112,16 @@ export async function deleteCommentApi(commentId: number): Promise<void> {
   await fetch(`${API_BASE}/comments/${commentId}`, { method: 'DELETE', headers: projectHeaders() });
 }
 
+export async function updateCommentApi(commentId: number, content: string): Promise<Comment> {
+  const res = await fetch(`${API_BASE}/comments/${commentId}`, {
+    method: 'PUT',
+    headers: jsonHeaders(),
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error('Failed to update comment');
+  return res.json();
+}
+
 export async function reactToComment(commentId: number, reaction: 'like' | 'dislike', userId?: number): Promise<{ likes: number; dislikes: number; userReaction: string | null }> {
   const res = await fetch(`${API_BASE}/comments/${commentId}/react`, {
     method: 'POST',

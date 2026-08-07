@@ -152,6 +152,14 @@ export async function addComment(
   return rows[0];
 }
 
+export async function updateComment(commentId: number, userId: number, content: string): Promise<any> {
+  const rows = await query(
+    'UPDATE comments SET content = $3, updated_at = NOW() WHERE id = $1 AND author_id = $2 RETURNING *',
+    [commentId, userId, content]
+  );
+  return rows[0] || null;
+}
+
 export async function deleteComment(commentId: number, userId: number): Promise<boolean> {
   const rows = await query(
     'DELETE FROM comments WHERE id = $1 AND author_id = $2 RETURNING id',

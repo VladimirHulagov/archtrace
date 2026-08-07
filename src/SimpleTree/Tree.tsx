@@ -544,6 +544,7 @@ export const Tree: React.FC<TreeProps> = ({
               onUpdate={handleNodeUpdate}
               onConnectionStart={handleConnectionStart}
               onConnectionEnd={handleConnectionEnd}
+              onDeleteNode={onDeleteNode}
             />
           ))}
         </TransformComponent>

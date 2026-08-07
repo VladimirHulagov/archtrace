@@ -8,6 +8,7 @@ import ReactMarkdown from 'react-markdown';
 import type { DecisionNode, Comment, Vote, CustomOption } from './api';
 import {
   postComment, deleteCommentApi, castVoteApi, removeVoteApi, addCustomOptionApi, updateCustomOptionApi,
+  updateCommentApi,
   updateDecision,
   startAnalysis, getAnalysisStatus,
   reactToComment,
@@ -67,6 +68,8 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const [aiAlternatives, setAiAlternatives] = useState<string[]>([]);
   const [editingOptionLetter, setEditingOptionLetter] = useState<string | null>(null);
   const [editingOptionTitle, setEditingOptionTitle] = useState('');
+  const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
+  const [editingCommentText, setEditingCommentText] = useState('');
 
   // ─── Resize logic ───────────────────────────────────────
   const isResizing = useRef(false);
@@ -149,6 +152,15 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const handleDeleteComment = useCallback(async (id: number) => {
     await deleteCommentApi(id);
     onCommentsChange(comments.filter(c => c.id !== id));
+  }, [comments, onCommentsChange]);
+
+  const handleUpdateComment = useCallback(async (commentId: number, newText: string) => {
+    if (!newText.trim()) return;
+    try {
+      const updated = await updateCommentApi(commentId, newText.trim());
+      onCommentsChange(comments.map(c => c.id === commentId ? { ...c, content: updated.content } : c));
+    } catch (err) { console.error('Update comment error:', err); }
+    setEditingCommentId(null);
   }, [comments, onCommentsChange]);
 
   const handleReact = useCallback(async (commentId: number, reaction: 'like' | 'dislike') => {
@@ -623,19 +635,37 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                       <span style={{ fontSize: '10px', color: '#999' }}>
                         {new Date(c.created_at).toLocaleDateString('ru', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                       </span>
-                      <button
-                        onClick={() => {
-                          if (confirm('Удалить комментарий?')) handleDeleteComment(c.id);
-                        }}
-                        title="Удалить"
-                        style={{
-                          border: 'none', background: 'none', cursor: 'pointer',
-                          color: '#cc4444', fontSize: '14px', padding: '2px',
-                        }}
-                      >🗑</button>
                     </div>
                   </div>
-                  <div style={{ fontSize: '12px', color: '#333', lineHeight: 1.4, marginBottom: '6px' }}>{c.content}</div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '6px', marginBottom: '6px' }}>
+                    {editingCommentId === c.id ? (
+                      <input
+                        type="text"
+                        value={editingCommentText}
+                        onChange={e => setEditingCommentText(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { e.preventDefault(); handleUpdateComment(c.id, editingCommentText); }
+                          if (e.key === 'Escape') { setEditingCommentId(null); }
+                        }}
+                        onBlur={() => { if (editingCommentText.trim() !== c.content) handleUpdateComment(c.id, editingCommentText); else setEditingCommentId(null); }}
+                        autoFocus
+                        style={{ flex: 1, fontSize: '12px', padding: '3px 6px', border: '1px solid #1890ff', borderRadius: '3px', color: '#333', lineHeight: 1.4, fontFamily: 'inherit' }}
+                      />
+                    ) : (
+                      <div
+                        onDoubleClick={() => { setEditingCommentId(c.id); setEditingCommentText(c.content); }}
+                        style={{ flex: 1, fontSize: '12px', color: '#333', lineHeight: 1.4, cursor: 'text' }}
+                        title="Двойной клик для редактирования"
+                      >{c.content}</div>
+                    )}
+                    {editingCommentId === c.id && (
+                      <button
+                        onClick={() => { if (confirm('Удалить комментарий?')) handleDeleteComment(c.id); }}
+                        title="Удалить"
+                        style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#cc4444', fontSize: '14px', padding: '0', flexShrink: 0 }}
+                      >🗑</button>
+                    )}
+                  </div>
                   {/* Like/dislike buttons */}
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <button

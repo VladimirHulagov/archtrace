@@ -13,6 +13,7 @@ export interface TreeNodeProps {
   onUpdate: (node: TreeNode) => void;
   onConnectionStart: (nodeId: string) => void;
   onConnectionEnd: (nodeId: string) => void;
+  onDeleteNode?: (nodeId: string) => void;
 }
 
 const VOTE_COLORS: Record<string, string> = {
@@ -40,6 +41,7 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
   onUpdate,
   onConnectionStart,
   onConnectionEnd,
+  onDeleteNode,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -166,6 +168,21 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
                 className={`${styles.node__status} ${statusClass}`}
                 aria-label={`Status: ${node.status}`}
               />
+            )}
+            {onDeleteNode && !node.id.startsWith('new-') && (
+              <span
+                onClick={(e) => { e.stopPropagation(); onDeleteNode(node.id); }}
+                style={{
+                  cursor: 'pointer', color: '#cc4444', fontSize: '12px',
+                  padding: '0 2px', marginLeft: '2px', flexShrink: 0,
+                  opacity: 0.6,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; }}
+                title="Удалить карточку"
+                role="button"
+                aria-label="Удалить карточку"
+              >🗑</span>
             )}
           </div>
 

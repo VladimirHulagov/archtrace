@@ -200,9 +200,15 @@ function App() {
   }, [nodes]);
 
   const handleDeleteNode = useCallback((nodeId: string) => {
-    setNodes(prev => prev.filter(n => n.id !== nodeId));
-    setConnections(prev => prev.filter(c => c.from !== nodeId && c.to !== nodeId));
-  }, []);
+    if (!confirm('Удалить карточку?')) return;
+    fetch(`/api/decisions/${nodeId}`, {
+      method: 'DELETE',
+      headers: { 'X-Project-Id': String(currentProject?.id || 1) },
+    }).then(() => {
+      setSelectedDetail(null);
+      reloadGraph();
+    }).catch(err => console.error('Delete failed:', err));
+  }, [currentProject, reloadGraph]);
 
 
 

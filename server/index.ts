@@ -18,7 +18,7 @@ import { loadConfig, saveConfig, type ArchTraceConfig } from './config.js';
 import { runArchitecturalAnalysis } from './ai-analysis.js';
 import { syncRepo, isRepoReady, getActiveDecisionsDir, pushChanges } from './git-sync.js';
 import {
-  getComments, addComment, deleteComment,
+  getComments, addComment, deleteComment, updateComment,
   getVotes, castVote, removeVote,
   toggleReaction,
   updateCustomOption,
@@ -294,6 +294,24 @@ app.delete('/api/comments/:commentId', async (req, res) => {
 });
 
 /**
+ * PUT /api/comments/:commentId
+ * Edit a comment. Body: { content }
+ */
+app.put('/api/comments/:commentId', async (req, res) => {
+  try {
+    const commentId = parseInt(req.params.commentId, 10);
+    const userId = req.body.userId || 1;
+    const { content } = req.body;
+    if (!content || !content.trim()) return res.status(400).json({ error: 'Content required' });
+    const updated = await updateComment(commentId, userId, content.trim());
+    if (!updated) return res.status(404).json({ error: 'Comment not found or not owned' });
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * GET /api/votes/:nodeId
  * Get all votes for a node.
  */
@@ -536,6 +554,37 @@ app.put('/api/decisions/:id', async (req, res) => {
   }
 });
 
+
+/**
+ * DELETE /api/decisions/:id
+ * Delete an ADR file, commit + push.
+ */
+app.delete('/api/decisions/:id', async (req, res) => {
+  try {
+    const projectId = getProjectId(req);
+    const dir = await projectDecisionsDir(projectId);
+    const { getProject } = await import('./db.js');
+    const project = await getProject(projectId);
+
+    const graph = buildGraph(dir);
+    const node = graph.nodes.find(n => n.id === req.params.id);
+    if (!node) return res.status(404).json({ error: 'Decision not found' });
+
+    const filePath = path.join(dir, node.file);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    if (project?.git_repo_url) {
+      const pushResult = pushChanges(`Delete ADR-${node.id}: ${node.title}`, loadConfig());
+      res.json({ id: node.id, pushResult: pushResult.success ? 'pushed' : 'saved locally', message: pushResult.message });
+    } else {
+      res.json({ id: node.id, message: 'deleted locally (no git repo)' });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Track in-progress analyses
 const analyzingNodes = new Set<string>();
