@@ -67,10 +67,10 @@ async function projectDecisionsDir(projectId: number): Promise<string> {
         if (fs.existsSync(cloneDir)) {
           fs.rmSync(cloneDir, { recursive: true, force: true });
         }
-        execSync(`git clone --depth 1 --branch ${branch} "${project.git_repo_url}" "${cloneDir}"`,
+        execSync(`git clone  --branch ${branch} "${project.git_repo_url}" "${cloneDir}"`,
           { stdio: 'pipe', timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
       } else {
-        execSync(`git fetch origin ${branch} --depth 1`, { cwd: cloneDir, stdio: 'pipe', timeout: 30000 });
+        execSync(`git fetch origin ${branch} `, { cwd: cloneDir, stdio: 'pipe', timeout: 30000 });
         execSync(`git reset --hard origin/${branch}`, { cwd: cloneDir, stdio: 'pipe', timeout: 15000 });
       }
       dir = path.resolve(cloneDir, repoPath);

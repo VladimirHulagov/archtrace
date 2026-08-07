@@ -55,14 +55,14 @@ export function syncRepo(config?: ArchTraceConfig): SyncResult {
 
       try {
         execSync(
-          `git clone --depth 1 --branch ${branch} "${cloneUrl}" "${cloneDir}"`,
+          `git clone  --branch ${branch} "${cloneUrl}" "${cloneDir}"`,
           { stdio: 'pipe', timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
         );
       } catch (cloneErr: any) {
         // Fallback: clone to temp dir, then copy contents
         const tempDir = cloneDir + '-tmp-' + Date.now();
         execSync(
-          `git clone --depth 1 --branch ${branch} "${cloneUrl}" "${tempDir}"`,
+          `git clone  --branch ${branch} "${cloneUrl}" "${tempDir}"`,
           { stdio: 'pipe', timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
         );
         // Copy all files including .git from temp to cloneDir
@@ -84,7 +84,7 @@ export function syncRepo(config?: ArchTraceConfig): SyncResult {
     }
 
     // Pull latest
-    execSync(`git fetch origin ${branch} --depth 1`, {
+    execSync(`git fetch origin ${branch} `, {
       cwd: cloneDir, stdio: 'pipe', timeout: 30000,
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     });
