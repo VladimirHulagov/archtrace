@@ -10,7 +10,7 @@ import {
   createDecision, updateDecision,
 } from './api';
 import { calculateLayout } from './SimpleTree/utils/positions';
-import { fetchGitInfo, revertGit } from './api';
+import { fetchGitInfo, revertGit, createProjectApi } from './api';
 import type { Point } from './SimpleTree/types';
 import ReactMarkdown from 'react-markdown';
 import { DetailPanel } from './DetailPanel';
@@ -61,6 +61,8 @@ function App() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [gitInfo, setGitInfo] = useState<{ commitHash: string | null; repoUrl: string | null; prevHash: string | null }>({ commitHash: null, repoUrl: null, prevHash: null });
   const [reverting, setReverting] = useState(false);
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [detailAsModal, setDetailAsModal] = useState(false);
   const [pendingNewNode, setPendingNewNode] = useState<TreeNode | null>(null);
   const [showRepoSetup, setShowRepoSetup] = useState(false);
   const [repoSetupProject, setRepoSetupProject] = useState<Project | null>(null);
@@ -290,6 +292,7 @@ function App() {
   }, [selectedDetail]);
 
   const handleNodeClick = useCallback((node: TreeNode) => {
+    setDetailAsModal(false);
     fetch(`/api/decisions/${node.id}?projectId=${currentProject?.id || 1}`).then(r => r.json()).then(data => {
       setSelectedDetail(data);
       setComments([]); setVotes([]); setCustomOptions([]);
@@ -460,6 +463,13 @@ function App() {
                 {p.description && <div style={{ fontSize: '11px', color: '#999' }}>{p.description}</div>}
               </div>
             ))}
+            <div onClick={() => { setShowNewProjectModal(true); setShowProjectMenu(false); }} style={{
+              padding: '10px 14px', cursor: 'pointer',
+              background: '#f6ffed', fontSize: '13px', color: '#389e0d',
+              fontWeight: 'bold', borderTop: '1px solid #d9f7be',
+            }}>
+              + Новое архитектурное решение
+            </div>
           </div>
         )}
       </div>
@@ -509,6 +519,7 @@ function App() {
           nodes={nodes} connections={connections}
           pendingNewNode={pendingNewNode}
           phaseBands={phaseBands}
+          onNodeDoubleClick={() => setDetailAsModal(true)}
           onNodeDrag={handleNodeDrag} onAddNode={handleAddNode}
           onDeleteNode={handleDeleteNode} onUpdateNode={handleUpdateNode}
           onAddConnection={handleAddConnection} onDeleteConnection={handleDeleteConnection}
@@ -521,7 +532,9 @@ function App() {
       {/* Detail Panel */}
       {selectedDetail && (
         <DetailPanel
+          key={detailAsModal ? 'modal-' + selectedDetail.id : 'sidebar-' + selectedDetail.id}
           detail={selectedDetail}
+          initialMode={detailAsModal ? 'modal' : 'sidebar'}
           comments={comments}
           votes={votes}
           customOptions={customOptions}
@@ -626,6 +639,129 @@ function App() {
         />
       )}
 
+
+
+      {/* New Project Modal */}
+      {showNewProjectModal && (
+        <NewProjectModal
+          onClose={() => setShowNewProjectModal(false)}
+          onCreated={async (project) => {
+            setShowNewProjectModal(false);
+            const updatedProjects = await fetchProjects();
+            setProjects(updatedProjects);
+            handleProjectSwitch(project);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── NewProjectModal ──────────────────────────────────────
+
+const DEFAULT_REPO = 'https://github.com/VladimirHulagov/archtrace-decisions.git';
+
+function slugify(text: string): string {
+  const map: Record<string, string> = {
+    'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'e','ж':'zh','з':'z',
+    'и':'i','й':'y','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r',
+    'с':'s','т':'t','у':'u','ф':'f','х':'h','ц':'ts','ч':'ch','ш':'sh','щ':'sch',
+    'ъ':'','ы':'y','ь':'','э':'e','ю':'yu','я':'ya',
+    ' ':'-','_':'-'
+  };
+  return text.toLowerCase().split('').map(ch => map[ch] ?? ch).join('')
+    .replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|$/g, '');
+}
+
+function NewProjectModal({ onClose, onCreated }: {
+  onClose: () => void;
+  onCreated: (p: Project) => void;
+}) {
+  const [name, setName] = useState('');
+  const [repoUrl, setRepoUrl] = useState(DEFAULT_REPO);
+  const [repoPath, setRepoPath] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
+
+  const autoPath = name ? slugify(name) : '';
+
+  const handleCreate = async () => {
+    if (!name.trim()) { setError('Введите название проекта'); return; }
+    setCreating(true); setError('');
+    try {
+      const slug = slugify(name.trim());
+      const gitPath = repoPath.trim() || slug;
+      const project = await createProjectApi({
+        name: name.trim(),
+        git_repo_url: repoUrl.trim(),
+        git_branch: 'main',
+        git_path: gitPath,
+      });
+      onCreated(project);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 3000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: '8px', padding: '24px',
+        width: '480px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+      }}>
+        <h2 style={{ margin: '0 0 16px 0', fontSize: '18px' }}>Новое архитектурное решение</h2>
+
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Название проекта *</label>
+          <input type="text" value={name} onChange={e => setName(e.target.value)}
+            placeholder="Напр: Система охлаждения"
+            style={{ width: '100%', padding: '8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '14px', boxSizing: 'border-box' }}
+            autoFocus
+            onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) handleCreate(); }}
+          />
+          {name && (
+            <div style={{ fontSize: '11px', color: '#999', marginTop: '4px' }}>
+             Slug: <code>{slugify(name)}</code> | Папка: <code>{repoPath || slugify(name)}</code>
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Git-репозиторий</label>
+          <input type="text" value={repoUrl} onChange={e => setRepoUrl(e.target.value)}
+            style={{ width: '100%', padding: '8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'monospace' }}
+          />
+        </div>
+
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Директория проекта (внутри репозитория)</label>
+          <input type="text" value={repoPath} onChange={e => setRepoPath(e.target.value)}
+            placeholder={autoPath || 'напр: cooling-system'}
+            style={{ width: '100%', padding: '8px', border: '1px solid #1890ff', borderRadius: '4px', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'monospace' }}
+          />
+        </div>
+
+        {error && <div style={{ color: '#ff4d4f', fontSize: '12px', marginBottom: '8px' }}>{error}</div>}
+
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{
+            padding: '8px 16px', border: '1px solid #d0d0d0', background: '#f0f0f0',
+            borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+          }}>Отмена</button>
+          <button onClick={handleCreate} disabled={creating || !name.trim()} style={{
+            padding: '8px 16px', border: 'none', borderRadius: '4px', cursor: creating ? 'wait' : 'pointer',
+            background: creating ? '#91d5ff' : '#1890ff',
+            color: '#fff', fontSize: '13px', fontWeight: 'bold',
+          }}>
+            {creating ? 'Создание...' : 'Создать (Ctrl+Enter)'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

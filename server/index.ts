@@ -23,7 +23,7 @@ import {
   toggleReaction,
   updateCustomOption,
   getCustomOptions, addCustomOption,
-  getOrCreateUser, getUserById, getProjects,
+  getOrCreateUser, getUserById, getProjects, createProject,
   checkDb,
   query,
   saveAnalysis, getAnalysis,
@@ -509,6 +509,23 @@ app.get('/api/projects', async (_req, res) => {
   try {
     const projects = await getProjects();
     res.json(projects);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/projects
+ */
+app.post('/api/projects', async (req, res) => {
+  try {
+    const { name, description, git_repo_url, git_branch, git_path } = req.body;
+    if (!name) return res.status(400).json({ error: 'name required' });
+    const project = await createProject(
+      name, description || null,
+      git_repo_url || null, git_branch || 'main', git_path || '.'
+    );
+    res.status(201).json(project);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

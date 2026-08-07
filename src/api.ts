@@ -195,6 +195,22 @@ export async function fetchProjects(): Promise<Project[]> {
   return res.json();
 }
 
+export async function createProjectApi(data: {
+  name: string;
+  description?: string;
+  git_repo_url?: string;
+  git_branch?: string;
+  git_path?: string;
+}): Promise<Project> {
+  const res = await fetch(`${API_BASE}/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to create project');
+  return res.json();
+}
+
 
 // Current project ID — updated when user switches project
 let _currentProjectId = 1;

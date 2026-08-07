@@ -153,12 +153,11 @@ export const Tree: React.FC<TreeProps> = ({
 
   const handleNodeDoubleClick = useCallback(
     (node: TreeNode) => {
-      // Double-click opens detail panel
-      if (onNodeClick) {
-        onNodeClick(node);
-      }
+      // Double-click: open detail + notify parent for modal mode
+      if (onNodeClick) onNodeClick(node);
+      if (onNodeDoubleClick) onNodeDoubleClick(node);
     },
-    [onNodeClick]
+    [onNodeClick, onNodeDoubleClick]
   );
 
   const handleNodeDrag = useCallback(

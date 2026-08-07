@@ -43,14 +43,15 @@ export interface DetailPanelProps {
   onCustomOptionsChange: (o: CustomOption[]) => void;
   onClose: () => void;
   onDeleteNode?: () => void;
+  initialMode?: 'sidebar' | 'modal';
 }
 
 export const DetailPanel: React.FC<DetailPanelProps> = ({
   detail, comments, votes, customOptions,
   currentUserId, currentRole,
-  onCommentsChange, onVotesChange, onCustomOptionsChange, onClose, onDeleteNode,
+  onCommentsChange, onVotesChange, onCustomOptionsChange, onClose, onDeleteNode, initialMode,
 }) => {
-  const [mode, setMode] = useState<PanelMode>('sidebar');
+  const [mode, setMode] = useState<PanelMode>(initialMode || 'sidebar');
   const [width, setWidth] = useState(420);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [commentText, setCommentText] = useState('');

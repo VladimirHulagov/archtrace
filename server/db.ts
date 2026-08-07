@@ -369,3 +369,10 @@ export async function getProjects(): Promise<Project[]> {
 export async function getProject(id: number): Promise<Project | null> {
   return queryOne('SELECT * FROM projects WHERE id = $1', [id]);
 }
+
+export async function createProject(name: string, description: string | null, gitRepoUrl: string | null, gitBranch: string, gitPath: string): Promise<Project> {
+  return queryOne(
+    'INSERT INTO projects (name, description, git_repo_url, git_branch, git_path) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+    [name, description, gitRepoUrl, gitBranch, gitPath]
+  );
+}
