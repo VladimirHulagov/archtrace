@@ -184,7 +184,7 @@ export async function runSectionSuggestion(params: {
       { role: 'user', content: prompt },
     ],
     temperature: 0.8,
-    max_tokens: 2000,
+    max_tokens: 4000,
   });
 
   const response = await callZai(requestBody);
@@ -225,7 +225,7 @@ async function callZai(body: string): Promise<string> {
     });
 
     req.on('error', reject);
-    req.setTimeout(20000, () => { req.destroy(); reject(new Error('Z.ai timeout')); });
+    req.setTimeout(60000, () => { req.destroy(); reject(new Error('Z.ai timeout')); });
     req.write(body);
     req.end();
   });
