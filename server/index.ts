@@ -38,6 +38,16 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+// Inject GitHub token into HTTPS git URL for private repos
+function authGitUrl(url: string): string {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) return url;
+  if (url.startsWith('https://github.com')) {
+    return url.replace('https://', `https://x-access-token:${token}@`);
+  }
+  return url;
+}
+
 // Cache of project → decisions dir
 const projectDirCache = new Map<number, string>();
 
@@ -67,7 +77,7 @@ async function projectDecisionsDir(projectId: number): Promise<string> {
         if (fs.existsSync(cloneDir)) {
           fs.rmSync(cloneDir, { recursive: true, force: true });
         }
-        execSync(`git clone  --branch ${branch} "${project.git_repo_url}" "${cloneDir}"`,
+        execSync(`git clone --branch ${branch} "${authGitUrl(project.git_repo_url)}" "${cloneDir}"`,
           { stdio: 'pipe', timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
       } else {
         execSync(`git fetch origin ${branch} `, { cwd: cloneDir, stdio: 'pipe', timeout: 30000 });

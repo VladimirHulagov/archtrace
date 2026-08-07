@@ -29,6 +29,7 @@ services:
       # Git credentials for ADR repo push
       - GIT_AUTHOR_NAME=ArchTrace
       - GIT_AUTHOR_EMAIL=archtrace@bots.collaborationism.tech
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
     labels:
       docker-guard.allow: "true"
       traefik.enable: "true"

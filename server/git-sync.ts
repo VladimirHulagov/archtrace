@@ -10,6 +10,16 @@ import fs from 'fs';
 import path from 'path';
 import { getCloneDir, getCloneUrl, getDecisionsDir, loadConfig, type ArchTraceConfig } from './config.js';
 
+function authGitUrl(url: string): string {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) return url;
+  if (url.startsWith('https://github.com')) {
+    return url.replace('https://', `https://x-access-token:${token}@`);
+  }
+  return url;
+}
+
+
 export interface SyncResult {
   success: boolean;
   action: 'clone' | 'pull' | 'none';
@@ -55,14 +65,14 @@ export function syncRepo(config?: ArchTraceConfig): SyncResult {
 
       try {
         execSync(
-          `git clone  --branch ${branch} "${cloneUrl}" "${cloneDir}"`,
+          `git clone  --branch ${branch} "${authGitUrl(cloneUrl)}" "${cloneDir}"`,
           { stdio: 'pipe', timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
         );
       } catch (cloneErr: any) {
         // Fallback: clone to temp dir, then copy contents
         const tempDir = cloneDir + '-tmp-' + Date.now();
         execSync(
-          `git clone  --branch ${branch} "${cloneUrl}" "${tempDir}"`,
+          `git clone  --branch ${branch} "${authGitUrl(cloneUrl)}" "${tempDir}"`,
           { stdio: 'pipe', timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
         );
         // Copy all files including .git from temp to cloneDir
