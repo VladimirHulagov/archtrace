@@ -335,6 +335,7 @@ function App() {
       const treeConnections = graph.connections.map(c => ({ id: c.id, from: c.from, to: c.to, kind: c.kind }));
       const { nodes: positioned, edgePoints: ePoints, phaseBands: pBands } = calculateLayout(treeNodes, treeConnections, window.innerWidth);
       setNodes(positioned); setConnections(treeConnections); setEdgePoints(ePoints); setPhaseBands(pBands); setLoading(false);
+      fetchGitInfo().then(info => { setGitInfo(info); setGitSyncStatus(info.commitHash ? 'synced' : 'none'); }).catch(() => setGitSyncStatus('error'));
 
       // Restore selected node
       if (initialNode) {
