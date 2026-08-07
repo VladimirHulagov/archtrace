@@ -323,6 +323,31 @@ export async function suggestSection(nodeId: string, section: 'context' | 'optio
   return res.json();
 }
 
+// ─── GitHub PAT ───────────────────────────────────────────
+
+export async function saveGithubToken(userId: number, token: string): Promise<{ success: boolean; username?: string }> {
+  const res = await fetch(`${API_BASE}/users/${userId}/github-token`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Failed to save token');
+  }
+  return res.json();
+}
+
+export async function deleteGithubToken(userId: number): Promise<void> {
+  await fetch(`${API_BASE}/users/${userId}/github-token`, { method: 'DELETE' });
+}
+
+export async function checkGithubToken(userId: number): Promise<{ hasToken: boolean }> {
+  const res = await fetch(`${API_BASE}/users/${userId}/github-token`);
+  if (!res.ok) return { hasToken: false };
+  return res.json();
+}
+
 export async function startAnalysis(nodeId: string): Promise<{ status: string }> {
   const res = await fetch(`${API_BASE}/decisions/${nodeId}/analyze`, {
     method: 'POST',

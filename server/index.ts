@@ -8,6 +8,7 @@
  */
 
 import express from 'express';
+import https from 'https';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
@@ -24,6 +25,7 @@ import {
   updateCustomOption,
   getCustomOptions, addCustomOption, deleteCustomOption,
   getOrCreateUser, getUserById, getProjects, createProject,
+  updateUserGithubToken, getUserGithubToken,
   checkDb,
   query,
   saveAnalysis, getAnalysis,
@@ -37,6 +39,19 @@ const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
+
+// Slugify Cyrillic to Latin (for repo names)
+function slugifyLatin(text: string): string {
+  const map: Record<string, string> = {
+    'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'e','ж':'zh','з':'z',
+    'и':'i','й':'y','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r',
+    'с':'s','т':'t','у':'u','ф':'f','х':'h','ц':'ts','ч':'ch','ш':'sh','щ':'sch',
+    'ъ':'','ы':'y','ь':'','э':'e','ю':'yu','я':'ya',
+    ' ':'-','_':'-'
+  };
+  return text.toLowerCase().split('').map(ch => map[ch] ?? ch).join('')
+    .replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+}
 
 // Inject GitHub token into HTTPS git URL for private repos
 function authGitUrl(url: string): string {
@@ -183,6 +198,152 @@ app.get('/api/sync/status', (_req, res) => {
       decisionsDir: ready ? getActiveDecisionsDir() : null,
       localFallback: !ready,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GitHub API helpers ──────────────────────────────────
+
+async function githubCreateRepo(token: string, name: string, description: string): Promise<{ success: boolean; repoUrl?: string; error?: string }> {
+  return new Promise((resolve) => {
+    const body = JSON.stringify({
+      name,
+      description,
+      private: true,
+      auto_init: true,
+    });
+    const req = https.request({
+      hostname: 'api.github.com',
+      path: '/user/repos',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'User-Agent': 'ArchTrace',
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (res.statusCode === 201) {
+            resolve({ success: true, repoUrl: json.clone_url || json.html_url });
+          } else if (res.statusCode === 422 && json.errors?.some((e: any) => e.code === 'already_exists')) {
+            // Repo already exists — use it
+            resolve({ success: true, repoUrl: json.errors?.[0]?.resource_url || `https://github.com/${json.errors?.[0]?.field}/${name}.git` });
+          } else {
+            resolve({ success: false, error: json.message || `HTTP ${res.statusCode}` });
+          }
+        } catch {
+          resolve({ success: false, error: `Parse error: ${data.substring(0, 200)}` });
+        }
+      });
+    });
+    req.on('error', (err) => resolve({ success: false, error: err.message }));
+    req.write(body);
+    req.end();
+  });
+}
+
+async function githubCheckToken(token: string): Promise<{ valid: boolean; username?: string; error?: string }> {
+  return new Promise((resolve) => {
+    const req = https.request({
+      hostname: 'api.github.com',
+      path: '/user',
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'ArchTrace',
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (res.statusCode === 200) {
+            resolve({ valid: true, username: json.login });
+          } else {
+            resolve({ valid: false, error: json.message || `HTTP ${res.statusCode}` });
+          }
+        } catch {
+          resolve({ valid: false, error: 'Parse error' });
+        }
+      });
+    });
+    req.on('error', (err) => resolve({ valid: false, error: err.message }));
+    req.end();
+  });
+}
+
+// Get user's PAT from DB, fallback to global env
+async function getGitToken(userId?: number): Promise<string | null> {
+  if (userId) {
+    const token = await getUserGithubToken(userId);
+    if (token) return token;
+  }
+  return process.env.GITHUB_TOKEN || null;
+}
+
+// Override authGitUrl to accept user-specific token
+function authGitUrlWithToken(url: string, token: string | null): string {
+  if (!token) return url;
+  if (url.startsWith('https://github.com')) {
+    return url.replace('https://', `https://x-access-token:${token}@`);
+  }
+  return url;
+}
+
+// ─── PAT Management Routes ────────────────────────────────
+
+/**
+ * PUT /api/users/:id/github-token
+ * Save or update GitHub PAT. Body: { token }
+ */
+app.put('/api/users/:id/github-token', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    const { token } = req.body;
+    if (!token || !token.trim()) return res.status(400).json({ error: 'token required' });
+
+    // Verify token
+    const check = await githubCheckToken(token.trim());
+    if (!check.valid) return res.status(400).json({ error: `Invalid token: ${check.error}` });
+
+    await updateUserGithubToken(userId, token.trim());
+    res.json({ success: true, username: check.username });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/users/:id/github-token
+ */
+app.delete('/api/users/:id/github-token', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    await updateUserGithubToken(userId, null);
+    res.status(204).end();
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/users/:id/github-token
+ * Returns whether user has a token (NOT the token itself)
+ */
+app.get('/api/users/:id/github-token', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    const token = await getUserGithubToken(userId);
+    res.json({ hasToken: !!token });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -571,11 +732,38 @@ app.get('/api/projects', async (_req, res) => {
  */
 app.post('/api/projects', async (req, res) => {
   try {
-    const { name, description, git_repo_url, git_branch, git_path } = req.body;
+    const { name, description, git_branch, git_path } = req.body;
+    let { git_repo_url } = req.body;
     if (!name) return res.status(400).json({ error: 'name required' });
+
+    // If no explicit repo URL, auto-create via GitHub API
+    if (!git_repo_url) {
+      const userId = req.body.userId || 1;
+      const token = await getGitToken(userId);
+      if (!token) {
+        return res.status(400).json({ error: 'No GitHub token. Add PAT in user profile first.' });
+      }
+
+      const slug = (git_path || slugifyLatin(name)).replace(/[^a-zA-Z0-9_-]/g, '-');
+      const check = await githubCheckToken(token);
+      if (!check.valid) {
+        return res.status(400).json({ error: `GitHub token invalid: ${check.error}` });
+      }
+
+      const ghUser = check.username!;
+      // Create repo named after slug
+      const result = await githubCreateRepo(token, slug, name);
+      if (!result.success) {
+        return res.status(400).json({ error: `Failed to create repo: ${result.error}` });
+      }
+
+      // Use the returned clone URL, or construct it
+      git_repo_url = result.repoUrl || `https://github.com/${ghUser}/${slug}.git`;
+    }
+
     const project = await createProject(
       name, description || null,
-      git_repo_url || null, git_branch || 'main', git_path || '.'
+      git_repo_url, git_branch || 'main', git_path || '.'
     );
     res.status(201).json(project);
   } catch (err: any) {

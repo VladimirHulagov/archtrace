@@ -351,6 +351,14 @@ export async function getAnalysis(nodeId: string, projectId: number): Promise<an
 }
 // ─── Users API ───────────────────────────────────────────
 
+// Ensure github_token column exists (safe to call multiple times)
+ensureGithubTokenColumn().catch(() => {});
+async function ensureGithubTokenColumn() {
+  try {
+    await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS github_token TEXT');
+  } catch {}
+}
+
 export async function getOrCreateUser(githubId: number, username: string, name: string | null, avatarUrl: string | null): Promise<User> {
   // Try to find by github_id
   let user = await queryOne('SELECT * FROM users WHERE github_id = $1', [githubId]);
@@ -366,6 +374,19 @@ export async function getOrCreateUser(githubId: number, username: string, name: 
 
 export async function getUserById(id: number): Promise<User | null> {
   return queryOne('SELECT * FROM users WHERE id = $1', [id]);
+}
+
+export async function updateUserGithubToken(userId: number, token: string | null): Promise<boolean> {
+  const rows = await query(
+    'UPDATE users SET github_token = $2 WHERE id = $1 RETURNING id',
+    [userId, token]
+  );
+  return rows.length > 0;
+}
+
+export async function getUserGithubToken(userId: number): Promise<string | null> {
+  const user = await queryOne('SELECT github_token FROM users WHERE id = $1', [userId]);
+  return user?.github_token || null;
 }
 
 // ─── Projects API ────────────────────────────────────────

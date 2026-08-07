@@ -10,7 +10,7 @@ import {
   createDecision, updateDecision,
 } from './api';
 import { calculateLayout } from './SimpleTree/utils/positions';
-import { fetchGitInfo, revertGit, createProjectApi } from './api';
+import { fetchGitInfo, revertGit, createProjectApi, saveGithubToken, checkGithubToken, deleteGithubToken } from './api';
 import type { Point } from './SimpleTree/types';
 import ReactMarkdown from 'react-markdown';
 import { DetailPanel } from './DetailPanel';
@@ -63,6 +63,8 @@ function App() {
   const [reverting, setReverting] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [detailAsModal, setDetailAsModal] = useState(false);
+  const [showPatModal, setShowPatModal] = useState(false);
+  const [hasGithubToken, setHasGithubToken] = useState(false);
   const [pendingNewNode, setPendingNewNode] = useState<TreeNode | null>(null);
   const [showRepoSetup, setShowRepoSetup] = useState(false);
   const [repoSetupProject, setRepoSetupProject] = useState<Project | null>(null);
@@ -496,6 +498,7 @@ function App() {
             {users.map(u => (
               <div key={u.id} onClick={() => {
                 setCurrentUser(u);
+                checkGithubToken(u.id).then(r => setHasGithubToken(r.hasToken)).catch(() => {});
                 setShowUserMenu(false);
               }} style={{
                 padding: '8px 14px', cursor: 'pointer',
@@ -509,6 +512,14 @@ function App() {
                 </span>
               </div>
             ))}
+            <div onClick={() => { setShowPatModal(true); setShowUserMenu(false); }} style={{
+              padding: '8px 14px', cursor: 'pointer',
+              background: '#f6ffed', fontSize: '13px', color: '#389e0d',
+              fontWeight: 'bold', borderTop: '1px solid #d9f7be',
+              display: 'flex', alignItems: 'center', gap: '6px',
+            }}>
+              🔑 GitHub токен {hasGithubToken ? '✅' : '⬚'}
+            </div>
           </div>
         )}
       </div>
@@ -641,6 +652,18 @@ function App() {
 
 
 
+      {/* PAT Modal */}
+      {showPatModal && (
+        <PatModal
+          userId={currentUser?.id || 1}
+          username={currentUser?.username || 'Гость'}
+          hasToken={hasGithubToken}
+          onClose={() => setShowPatModal(false)}
+          onSaved={() => { setHasGithubToken(true); setShowPatModal(false); }}
+          onDeleted={() => { setHasGithubToken(false); }}
+        />
+      )}
+
       {/* New Project Modal */}
       {showNewProjectModal && (
         <NewProjectModal
@@ -653,6 +676,106 @@ function App() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+// ─── PatModal ────────────────────────────────────────────
+
+function PatModal({ userId, username, hasToken, onClose, onSaved, onDeleted }: {
+  userId: number;
+  username: string;
+  hasToken: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+  onDeleted: () => void;
+}) {
+  const [token, setToken] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [ghUser, setGhUser] = useState('');
+
+  const handleSave = async () => {
+    if (!token.trim()) { setError('Введите токен'); return; }
+    setSaving(true); setError('');
+    try {
+      const result = await saveGithubToken(userId, token.trim());
+      setGhUser(result.username || '');
+      onSaved();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    try {
+      await deleteGithubToken(userId);
+      onDeleted();
+      onClose();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 3000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: '8px', padding: '24px',
+        width: '480px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+      }}>
+        <h2 style={{ margin: '0 0 16px 0', fontSize: '18px' }}>
+          🔑 GitHub Personal Access Token
+        </h2>
+
+        <div style={{ fontSize: '13px', color: '#666', marginBottom: '16px', lineHeight: 1.5 }}>
+          <p style={{ margin: '0 0 8px 0' }}><b>Пользователь:</b> {username}</p>
+          <p style={{ margin: '0 0 8px 0' }}>
+            Создайте токен на{' '}
+            <a href="https://github.com/settings/tokens/new?scopes=repo" target="_blank" rel="noopener noreferrer" style={{ color: '#1890ff' }}>
+              github.com/settings/tokens
+            </a>
+            {' '}со scope <code>repo</code> (полный доступ к репозиториям).
+          </p>
+          <p style={{ margin: 0 }}>Токен используется для создания репозиториев и синхронизации ADR.</p>
+        </div>
+
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Personal Access Token</label>
+          <input
+            type="password"
+            value={token}
+            onChange={e => setToken(e.target.value)}
+            placeholder="ghp_..."
+            style={{ width: '100%', padding: '8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '14px', fontFamily: 'monospace', boxSizing: 'border-box' }}
+            autoFocus
+            onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) handleSave(); }}
+          />
+        </div>
+
+        {hasToken && (
+          <div style={{ marginBottom: '12px', padding: '8px', background: '#f6ffed', borderRadius: '4px', border: '1px solid #b7eb8f', fontSize: '12px', color: '#389e0d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>✅ Токен сохранён{ghUser ? ` (${ghUser})` : ''}</span>
+            <button onClick={handleDelete} style={{ border: '1px solid #ffccc7', background: '#fff2f0', color: '#ff4d4f', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}>Удалить</button>
+          </div>
+        )}
+
+        {error && <div style={{ color: '#ff4d4f', fontSize: '12px', marginBottom: '8px' }}>{error}</div>}
+
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '8px 16px', border: '1px solid #d0d0d0', background: '#f0f0f0', borderRadius: '4px', cursor: 'pointer', fontSize: '13px' }}>Закрыть</button>
+          <button onClick={handleSave} disabled={saving || !token.trim()} style={{
+            padding: '8px 16px', border: 'none', borderRadius: '4px', cursor: saving ? 'wait' : 'pointer',
+            background: saving ? '#91d5ff' : '#1890ff', color: '#fff', fontSize: '13px', fontWeight: 'bold',
+          }}>
+            {saving ? 'Проверка...' : 'Сохранить (Ctrl+Enter)'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -678,7 +801,7 @@ function NewProjectModal({ onClose, onCreated }: {
   onCreated: (p: Project) => void;
 }) {
   const [name, setName] = useState('');
-  const [repoUrl, setRepoUrl] = useState(DEFAULT_REPO);
+
   const [repoPath, setRepoPath] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
@@ -693,7 +816,6 @@ function NewProjectModal({ onClose, onCreated }: {
       const gitPath = repoPath.trim() || slug;
       const project = await createProjectApi({
         name: name.trim(),
-        git_repo_url: repoUrl.trim(),
         git_branch: 'main',
         git_path: gitPath,
       });
@@ -731,11 +853,8 @@ function NewProjectModal({ onClose, onCreated }: {
           )}
         </div>
 
-        <div style={{ marginBottom: '12px' }}>
-          <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Git-репозиторий</label>
-          <input type="text" value={repoUrl} onChange={e => setRepoUrl(e.target.value)}
-            style={{ width: '100%', padding: '8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'monospace' }}
-          />
+        <div style={{ marginBottom: '12px', padding: '8px', background: '#f0f5ff', borderRadius: '4px', border: '1px solid #adc6ff', fontSize: '12px', color: '#2f54eb' }}>
+          📦 Приватный репозиторий <code>{repoPath || slugify(name)}</code> будет создан автоматически через GitHub API
         </div>
 
         <div style={{ marginBottom: '12px' }}>
