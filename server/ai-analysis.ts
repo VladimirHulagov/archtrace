@@ -18,19 +18,26 @@ interface AnalysisContext {
   adrId: string;
   adrTitle: string;
   adrBody: string;
+  phase: number;
   parentTitle?: string;
   parentBody?: string;
   childrenTitles: string[];
   options: { letter: string; title: string }[];
 }
 
-export async function runArchitecturalAnalysis(ctx: AnalysisContext): Promise<{ analysis: string; model: string }> {
-  const prompt = buildPrompt(ctx);
+interface AnalysisResult {
+  analysis: string;
+  model: string;
+  alternatives?: string[];
+}
+
+export async function runArchitecturalAnalysis(ctx: AnalysisContext): Promise<AnalysisResult> {
+  const prompt = buildPhasePrompt(ctx);
 
   const requestBody = JSON.stringify({
     model: MODEL,
     messages: [
-      { role: 'system', content: 'Ты — старший архитектор аппаратного обеспечения. Анализируешь архитектурные решения (ADR) на концептуальном уровне. Отвечаешь ТОЛЬКО на русском языке. Не касаешься QA, тестирования или багов.' },
+      { role: 'system', content: 'Ты — старший архитектор. Анализируешь архитектурные решения на концептуальном уровне. Отвечаешь ТОЛЬКО на русском языке. Не касаешься QA, тестирования или багов.' },
       { role: 'user', content: prompt },
     ],
     temperature: 0.7,
@@ -38,10 +45,87 @@ export async function runArchitecturalAnalysis(ctx: AnalysisContext): Promise<{ 
   });
 
   const response = await callZai(requestBody);
-  return { analysis: response, model: MODEL };
+  const alternatives = extractAlternatives(response);
+  return { analysis: response, model: MODEL, alternatives };
 }
 
-function buildPrompt(ctx: AnalysisContext): string {
+/** Extract suggested alternatives from the AI response (lines starting with "Альтернатива:" or bullet items in Alternatives section) */
+function extractAlternatives(text: string): string[] {
+  const alts: string[] = [];
+  // Match patterns like "- **Альтернатива:** ..." or "Альтернатива: ..." or lines in an "## Альтернативы" section
+  const lines = text.split('\n');
+  let inAltSection = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^#{1,3}\s*(Альтернативы|Alternatives)/i.test(trimmed)) { inAltSection = true; continue; }
+    if (/^#{1,3}\s/.test(trimmed) && inAltSection) { inAltSection = false; }
+    if (inAltSection && /^[-*]\s+/.test(trimmed)) {
+      const clean = trimmed.replace(/^[-*]\s+/, '').replace(/\*\*/g, '').trim();
+      if (clean.length > 5) alts.push(clean);
+    }
+    // Also match inline "Альтернатива:" prefix
+    const altMatch = trimmed.match(/^(?:[-*]?\s*)?\*{0,2}Альтернатива[:\s]*\*{0,2}\s*(.+)/i);
+    if (altMatch && altMatch[1].length > 5) {
+      alts.push(altMatch[1].trim());
+    }
+  }
+  return [...new Set(alts)].slice(0, 5); // dedupe, max 5
+}
+
+function buildPhasePrompt(ctx: AnalysisContext): string {
+  switch (ctx.phase) {
+    case 1: return buildProblemPrompt(ctx);
+    case 2: return buildRequirementPrompt(ctx);
+    case 3: return buildParadigmPrompt(ctx);
+    case 4: default: return buildAdrPrompt(ctx);
+  }
+}
+
+function buildProblemPrompt(ctx: AnalysisContext): string {
+  let p = `Проанализируй следующую постановку проблемы на концептуальном уровне.\n\n`;
+  p += `## Проблема\n\n**${ctx.adrTitle}**\n\n${ctx.adrBody}\n\n`;
+  p += `## Задача анализа\n\n`;
+  p += `1. **Существует ли проблема реально?** — Оцени, является ли описанная проблема действительной. Возможно, это не проблема, а уже известное решение?\n`;
+  p += `2. **Есть ли готовые решения?** — Укажи, существуют ли уже известные подходы или продукты, решающие эту проблему.\n`;
+  p += `3. **Масштаб и значимость** — Насколько проблема критична? Что будет, если её не решать?\n`;
+  p += `4. **Альтернативы** — Предложи 2-3 альтернативных формулировки проблемы или подхода к её решению.\n\n`;
+  p += `В конце ответа добавь секцию "## Альтернативы" со списком предложенных вариантов (если есть).\n`;
+  p += `Формат — краткий markdown. Максимум 300 слов.`;
+  return p;
+}
+
+function buildRequirementPrompt(ctx: AnalysisContext): string {
+  let p = `Проанализируй следующее требование на концептуальном уровне.\n\n`;
+  p += `## Требование\n\n**${ctx.adrTitle}**\n\n${ctx.adrBody}\n\n`;
+  if (ctx.parentTitle) p += `## Родительская проблема\n\n**${ctx.parentTitle}**\n\n${ctx.parentBody || '(нет тела)'}\n\n`;
+  p += `## Задача анализа\n\n`;
+  p += `1. **Полнота** — Все ли аспекты проблемы покрыты этим требованием?\n`;
+  p += `2. **Однозначность** — Сформулировано ли требование чётко, без двусмысленности?\n`;
+  p += `3. **Проверимость** — Можно ли проверить, что требование выполнено?\n`;
+  p += `4. **Альтернативы** — Предложи 2-3 альтернативных требования или уточнения.\n\n`;
+  p += `В конце ответа добавь секцию "## Альтернативы" со списком предложенных вариантов (если есть).\n`;
+  p += `Формат — краткий markdown. Максимум 300 слов.`;
+  return p;
+}
+
+function buildParadigmPrompt(ctx: AnalysisContext): string {
+  let p = `Проанализируй следующую концепцию/парадигму решения на концептуальном уровне.\n\n`;
+  p += `## Концепция\n\n**${ctx.adrTitle}**\n\n${ctx.adrBody}\n\n`;
+  if (ctx.parentTitle) p += `## Родительское требование\n\n**${ctx.parentTitle}**\n\n${ctx.parentBody || '(нет тела)'}\n\n`;
+  if (ctx.options.length > 0) {
+    p += `## Варианты\n\n${ctx.options.map(o => `- Вариант ${o.letter}: ${o.title}`).join('\n')}\n\n`;
+  }
+  p += `## Задача анализа\n\n`;
+  p += `1. **Осуществимость** — Реализуема ли предложенная концепция?\n`;
+  p += `2. **Покрытие требований** — Какие требования адресует эта парадигма?\n`;
+  p += `3. **Риски** — Какие архитектурные риски несёт этот подход?\n`;
+  p += `4. **Альтернативы** — Предложи 2-3 альтернативные парадигмы/подходы.\n\n`;
+  p += `В конце ответа добавь секцию "## Альтернативы" со списком предложенных вариантов (если есть).\n`;
+  p += `Формат — краткий markdown. Максимум 300 слов.`;
+  return p;
+}
+
+function buildAdrPrompt(ctx: AnalysisContext): string {
   let prompt = `Проанализируй следующее архитектурное решение (ADR) на концептуальном уровне.\n\n`;
   prompt += `## Текущее решение\n\n**ADR-${ctx.adrId}: ${ctx.adrTitle}**\n\n${ctx.adrBody}\n\n`;
 

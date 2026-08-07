@@ -13,7 +13,7 @@ import path from 'path';
 import fs from 'fs';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { buildGraph, tallyVotes, generateAdrMarkdown, type DecisionNode } from './parse.js';
+import { buildGraph, tallyVotes, generateAdrMarkdown, parseBodySections, type DecisionNode } from './parse.js';
 import { loadConfig, saveConfig, type ArchTraceConfig } from './config.js';
 import { runArchitecturalAnalysis } from './ai-analysis.js';
 import { syncRepo, isRepoReady, getActiveDecisionsDir, pushChanges } from './git-sync.js';
@@ -495,7 +495,15 @@ app.put('/api/decisions/:id', async (req, res) => {
 
     const filePath = path.join(dir, node.file);
 
-    // Generate updated markdown preserving frontmatter fields
+    // Parse existing body sections to preserve unmodified fields
+    const existing = parseBodySections(node.body);
+
+    // Reconstruct structured options from existing node if not provided
+    let optionsForGen = req.body.options;
+    if (!optionsForGen && node.options?.length) {
+      optionsForGen = node.options.map(o => ({ letter: o.letter, title: o.title }));
+    }
+
     const { content: md } = generateAdrMarkdown({
       id: node.id,
       title: req.body.title || node.title,
@@ -503,10 +511,11 @@ app.put('/api/decisions/:id', async (req, res) => {
       type: node.type,
       parent: node.parent,
       cross_refs: node.cross_refs,
-      context: req.body.context,
-      options: req.body.options,
-      decision: req.body.decision,
-      consequences: req.body.consequences,
+      context: req.body.context !== undefined ? req.body.context : existing.context,
+      options: optionsForGen,
+      decision: req.body.decision !== undefined ? req.body.decision : existing.decision,
+      consequences: req.body.consequences !== undefined ? req.body.consequences : existing.consequences,
+      created: node.created,
     });
 
     fs.writeFileSync(filePath, md, 'utf-8');
@@ -564,6 +573,7 @@ app.post('/api/decisions/:id/analyze', async (req, res) => {
           adrId: node.id,
           adrTitle: node.title,
           adrBody: node.body,
+          phase: node.phase || 4,
           parentTitle, parentBody,
           childrenTitles: children.map(c => c.title),
           options: node.options || [],

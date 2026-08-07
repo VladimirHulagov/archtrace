@@ -7,6 +7,37 @@
 import fs from 'fs';
 import path from 'path';
 
+
+// ─── Phase mapping ────────────────────────────────────────
+// Phase 1 = Problem/Task, 2 = Requirement, 3 = Paradigm/Concept, 4 = ADR Decision
+export function typeToPhase(type: string): 1 | 2 | 3 | 4 {
+  switch (type) {
+    case 'problem': return 1;
+    case 'requirement': return 2;
+    case 'paradigm': return 3;
+    case 'decision':
+    case 'task':
+    default: return 4;
+  }
+}
+
+export function phaseToType(phase: number): string {
+  switch (phase) {
+    case 1: return 'problem';
+    case 2: return 'requirement';
+    case 3: return 'paradigm';
+    case 4: default: return 'decision';
+  }
+}
+
+// Phase metadata for UI
+export const PHASE_INFO: Record<number, { name: string; color: string; bg: string; label: string }> = {
+  1: { name: 'Проблема', color: '#e74c3c', bg: 'rgba(231, 76, 60, 0.08)', label: '🔥' },
+  2: { name: 'Требования', color: '#3498db', bg: 'rgba(52, 152, 219, 0.08)', label: '📋' },
+  3: { name: 'Концепция', color: '#2ecc71', bg: 'rgba(46, 204, 113, 0.08)', label: '💡' },
+  4: { name: 'Решения (ADR)', color: '#9b59b6', bg: 'rgba(155, 89, 182, 0.08)', label: '⚙️' },
+};
+
 // ─── Types ────────────────────────────────────────────────
 
 export interface Voter {
@@ -21,7 +52,8 @@ export interface DecisionNode {
   id: string;
   title: string;
   status: 'proposed' | 'debating' | 'accepted' | 'rejected' | 'superseded';
-  type: 'requirement' | 'decision' | 'task';
+  type: 'problem' | 'requirement' | 'paradigm' | 'decision' | 'task';
+  phase: 1 | 2 | 3 | 4;
   parent: string | null;
   cross_refs: string[];
   created: string;
@@ -257,11 +289,14 @@ export function parseDecisionFile(filePath: string): DecisionNode | null {
   const raw = fs.readFileSync(filePath, 'utf-8');
   const { frontmatter, body } = parseFrontmatter(raw);
 
+  const rawType = frontmatter.type || 'decision';
+  const rawPhase = frontmatter.phase;
   return {
     id: frontmatter.id || path.basename(filePath, '.md'),
     title: frontmatter.title || 'Untitled',
     status: frontmatter.status || 'proposed',
-    type: frontmatter.type || 'decision',
+    type: rawType,
+    phase: rawPhase ? (parseInt(String(rawPhase), 10) as 1|2|3|4) : typeToPhase(rawType),
     parent: frontmatter.parent ?? null,
     cross_refs: frontmatter.cross_refs || [],
     created: frontmatter.created || new Date().toISOString().split('T')[0],
@@ -328,6 +363,41 @@ export function tallyVotes(voters: Voter[]): Record<string, number> {
 }
 
 
+// ─── Body Section Parser ───────────────────────────────────
+
+export interface BodySections {
+  context: string;
+  options: string;
+  decision: string;
+  consequences: string;
+}
+
+export function parseBodySections(body: string): BodySections {
+  const sections: BodySections = { context: '', options: '', decision: '', consequences: '' };
+  const headerRegex = /^## (.+)$/gm;
+  const matches: { title: string; start: number; end: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = headerRegex.exec(body)) !== null) {
+    matches.push({ title: m[1].trim().toLowerCase(), start: m.index + m[0].length, end: body.length });
+  }
+  for (let i = 0; i < matches.length; i++) {
+    matches[i].end = i + 1 < matches.length ? matches[i + 1].start - matches[i + 1].title.length - 3 : body.length;
+  }
+  for (const match of matches) {
+    const content = body.substring(match.start, match.end).trim();
+    if (match.title === 'context' || match.title === 'контекст' || match.title === 'контекста' || match.title === 'требование') {
+      sections.context = content;
+    } else if (match.title === 'options' || match.title === 'опции' || match.title === 'варианты') {
+      sections.options = content;
+    } else if (match.title === 'decision' || match.title === 'решение') {
+      sections.decision = content;
+    } else if (match.title === 'consequences' || match.title === 'последствия') {
+      sections.consequences = content;
+    }
+  }
+  return sections;
+}
+
 // ─── ADR Markdown Generator ───────────────────────────────
 
 export interface AdrInput {
@@ -335,25 +405,29 @@ export interface AdrInput {
   title: string;
   status?: string;
   type?: string;
+  phase?: number;
   parent?: string | null;
   cross_refs?: string[];
   context?: string;
   options?: { letter: string; title: string; description?: string }[];
   decision?: string;
   consequences?: string;
+  created?: string;
 }
 
 export function generateAdrMarkdown(input: AdrInput): { filename: string; content: string } {
   const id = input.id || String(Date.now()).slice(-3);
   const status = input.status || 'proposed';
   const type = input.type || 'decision';
+  const phase = input.phase || typeToPhase(type);
   const parent = input.parent || 'null';
-  const created = new Date().toISOString().split('T')[0];
+  const created = input.created || new Date().toISOString().split('T')[0];
 
   // Build frontmatter
   let fm = `---\nid: "${id}"\ntitle: "${input.title.replace(/"/g, '\\"')}"\n`;
   fm += `status: ${status}\n`;
   fm += `type: ${type}\n`;
+  fm += `phase: ${phase}\n`;
   fm += `parent: ${parent === 'null' ? 'null' : `"${parent}"`}\n`;
   fm += `cross_refs: ${input.cross_refs?.length ? JSON.stringify(input.cross_refs).replace(/\[|\]|"/g, m => m === '[' ? '[' : m === ']' ? ']' : '"') : '[]'}\n`;
   fm += `created: ${created}\n`;

@@ -70,11 +70,20 @@ export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel, re
       e.preventDefault();
       onCancel();
     }
+    // Enter on title field saves (if title not empty)
+    if (e.key === 'Enter' && !e.shiftKey) {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' && title.trim()) {
+        e.preventDefault();
+        handleSave();
+      }
+    }
+    // Ctrl+Enter saves from any field
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      handleSave();
+      if (title.trim()) handleSave();
     }
-  }, [handleSave, onCancel]);
+  }, [handleSave, onCancel, title]);
 
   const handleOverlayClick = useCallback((e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {

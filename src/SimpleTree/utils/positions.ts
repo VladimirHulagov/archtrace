@@ -59,6 +59,29 @@ export function groupByLevel(
   return levels;
 }
 
+
+// ─── Phase layout constants ──────────────────────────────
+const PHASE_BAND_HEIGHT = 250;  // vertical space per phase band
+const PHASE_BAND_GAP = 20;      // gap between phase bands
+const PHASE_LABEL_WIDTH = 140;  // left margin for phase label
+
+// Phase metadata for layout colors
+export const PHASE_LAYOUT: Record<number, { color: string; bg: string; name: string }> = {
+  1: { color: '#e74c3c', bg: 'rgba(231, 76, 60, 0.06)', name: 'Проблема' },
+  2: { color: '#3498db', bg: 'rgba(52, 152, 219, 0.06)', name: 'Требования' },
+  3: { color: '#2ecc71', bg: 'rgba(46, 204, 113, 0.06)', name: 'Концепция' },
+  4: { color: '#9b59b6', bg: 'rgba(155, 89, 182, 0.06)', name: 'Решения' },
+};
+
+export interface PhaseBand {
+  phase: number;
+  name: string;
+  color: string;
+  bg: string;
+  y: number;
+  height: number;
+}
+
 /**
  * Run dagre layout on nodes + connections.
  * Returns positioned nodes (x/y = top-left) and edge waypoints for each connection.
@@ -181,60 +204,134 @@ export function computePortOffsets(connections: Connection[]): Map<string, PortO
 export function calculateLayout(
   nodes: TreeNode[],
   connections: Connection[],
-  _containerWidth: number
-): { nodes: TreeNode[]; edgePoints: Map<string, Point[]> } {
-  const g = new dagre.graphlib.Graph();
-
-  g.setGraph({
-    rankdir: 'TB',
-    nodesep: 50,
-    ranksep: 120,
-    marginx: PADDING,
-    marginy: PADDING,
-    edgesep: 30,
-  });
-
-  g.setDefaultEdgeLabel(() => ({}));
-
-  // Add nodes with their sizes
+  containerWidth: number
+): { nodes: TreeNode[]; edgePoints: Map<string, Point[]>; phaseBands: PhaseBand[] } {
+  // Group nodes by phase
+  const phaseGroups = new Map<number, TreeNode[]>();
   nodes.forEach(node => {
-    const size = getNodeSize(node);
-    g.setNode(node.id, { width: size.width, height: size.height });
+    const phase = node.phase || 4;
+    if (!phaseGroups.has(phase)) phaseGroups.set(phase, []);
+    phaseGroups.get(phase)!.push(node);
   });
 
-  // Add all connections as edges (parent + cross-ref)
-  // Only parent connections influence ranking; cross-ref edges get higher weight penalty
-  connections.forEach(conn => {
-    const isParent = !conn.kind || conn.kind === 'parent';
-    g.setEdge(conn.from, conn.to, {
-      id: conn.id,
-      weight: isParent ? 1 : 0,
-      minlen: isParent ? 1 : 1,
-    });
-  });
-
-  dagre.layout(g);
-
-  // Apply dagre center coordinates → convert to top-left
-  nodes.forEach(node => {
-    const dn = g.node(node.id);
-    if (dn) {
-      node.x = dn.x - dn.width / 2;
-      node.y = dn.y - dn.height / 2;
-    }
-  });
-
-  // Extract edge waypoints
+  const sortedPhases = [...phaseGroups.keys()].sort((a, b) => a - b);
+  const phaseBands: PhaseBand[] = [];
   const edgePoints = new Map<string, Point[]>();
-  g.edges().forEach(e => {
-    const edge = g.edge(e);
-    const connId = edge.id as string;
-    if (edge.points && connId) {
-      edgePoints.set(connId, edge.points.map((p: { x: number; y: number }) => ({ x: p.x, y: p.y })));
-    }
+  let currentY = PADDING;
+
+  for (const phase of sortedPhases) {
+    const phaseNodes = phaseGroups.get(phase)!;
+    const phaseConnections = connections.filter(c => {
+      const fromNode = nodes.find(n => n.id === c.from);
+      const toNode = nodes.find(n => n.id === c.to);
+      // Include connections where either endpoint is in this phase
+      return (fromNode && (fromNode.phase || 4) === phase) ||
+             (toNode && (toNode.phase || 4) === phase);
+    });
+
+    // Build a subgraph for this phase using dagre
+    const g = new dagre.graphlib.Graph();
+    g.setGraph({
+      rankdir: 'TB',
+      nodesep: 50,
+      ranksep: 80,
+      marginx: PADDING + PHASE_LABEL_WIDTH,
+      marginy: PADDING,
+      edgesep: 30,
+    });
+    g.setDefaultEdgeLabel(() => ({}));
+
+    // Only add nodes from this phase
+    phaseNodes.forEach(node => {
+      const size = getNodeSize(node);
+      g.setNode(node.id, { width: size.width, height: size.height });
+    });
+
+    // Add connections within this phase only
+    phaseConnections.forEach(conn => {
+      // Only add edge if both nodes exist in this subgraph
+      if (g.hasNode(conn.from) && g.hasNode(conn.to)) {
+        const isParent = !conn.kind || conn.kind === 'parent';
+        g.setEdge(conn.from, conn.to, {
+          id: conn.id,
+          weight: isParent ? 1 : 0,
+          minlen: 1,
+        });
+      }
+    });
+
+    dagre.layout(g);
+
+    // Find bounds of this phase subgraph
+    let pMinX = Infinity, pMaxX = -Infinity, pMaxY = -Infinity;
+    phaseNodes.forEach(node => {
+      const dn = g.node(node.id);
+      if (dn) {
+        pMinX = Math.min(pMinX, dn.x - dn.width / 2);
+        pMaxX = Math.max(pMaxX, dn.x + dn.width / 2);
+        pMaxY = Math.max(pMaxY, dn.y + dn.height / 2);
+      }
+    });
+    const phaseWidth = pMaxX - pMinX;
+    const phaseOffsetX = Math.max(0, (containerWidth - phaseWidth) / 2 - pMinX);
+
+    // Position nodes within the phase band
+    phaseNodes.forEach(node => {
+      const dn = g.node(node.id);
+      if (dn) {
+        node.x = dn.x - dn.width / 2 + phaseOffsetX;
+        node.y = dn.y - dn.height / 2 + currentY;
+      }
+    });
+
+    // Extract edge waypoints for this phase
+    g.edges().forEach(e => {
+      const edge = g.edge(e);
+      const connId = edge.id as string;
+      if (edge.points && connId) {
+        edgePoints.set(connId, edge.points.map((p: { x: number; y: number }) => ({ x: p.x + phaseOffsetX, y: p.y + currentY })));
+      }
+    });
+
+    const bandHeight = Math.max(pMaxY + PADDING, 100);
+    const layout = PHASE_LAYOUT[phase] || PHASE_LAYOUT[4];
+    phaseBands.push({
+      phase,
+      name: layout.name,
+      color: layout.color,
+      bg: layout.bg,
+      y: currentY - PADDING,
+      height: bandHeight + PADDING,
+    });
+
+    currentY += bandHeight + PHASE_BAND_GAP;
+  }
+
+  // Now handle cross-phase connections (parent links between phases)
+  connections.forEach(conn => {
+    if (edgePoints.has(conn.id)) return; // already handled within a phase
+    const fromNode = nodes.find(n => n.id === conn.from);
+    const toNode = nodes.find(n => n.id === conn.to);
+    if (!fromNode || !toNode) return;
+
+    const fromSize = getNodeSize(fromNode);
+    const toSize = getNodeSize(toNode);
+    const fromCx = fromNode.x + fromSize.width / 2;
+    const fromBottom = fromNode.y + fromSize.height;
+    const toCx = toNode.x + toSize.width / 2;
+    const toTop = toNode.y;
+
+    // Simple orthogonal route for cross-phase links
+    const midY = (fromBottom + toTop) / 2;
+    edgePoints.set(conn.id, [
+      { x: fromCx, y: fromBottom },
+      { x: fromCx, y: midY },
+      { x: toCx, y: midY },
+      { x: toCx, y: toTop },
+    ]);
   });
 
-  return { nodes, edgePoints };
+  return { nodes, edgePoints, phaseBands };
 }
 
 /**
@@ -246,6 +343,15 @@ export function calculatePositions(
   containerWidth: number
 ): TreeNode[] {
   return calculateLayout(nodes, connections, containerWidth).nodes;
+}
+
+/** Get phase bands for background rendering */
+export function getPhaseBands(
+  nodes: TreeNode[],
+  connections: Connection[],
+  containerWidth: number
+): PhaseBand[] {
+  return calculateLayout(nodes, connections, containerWidth).phaseBands;
 }
 
 export function hasDuplicateConnection(

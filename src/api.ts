@@ -2,7 +2,8 @@ export interface DecisionNode {
   id: string;
   title: string;
   status: 'proposed' | 'debating' | 'accepted' | 'rejected' | 'superseded';
-  type: 'requirement' | 'decision' | 'task';
+  type: 'problem' | 'requirement' | 'paradigm' | 'decision' | 'task';
+  phase?: 1 | 2 | 3 | 4;
   parent: string | null;
   cross_refs: string[];
   created: string;
@@ -233,6 +234,7 @@ export interface AdrInput {
   title: string;
   parent?: string | null;
   type?: string;
+  phase?: number;
   context?: string;
   options?: { letter: string; title: string; description?: string }[];
   decision?: string;

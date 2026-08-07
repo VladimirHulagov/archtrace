@@ -64,6 +64,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [aiError, setAiError] = useState('');
+  const [aiAlternatives, setAiAlternatives] = useState<string[]>([]);
   const [editingOptionLetter, setEditingOptionLetter] = useState<string | null>(null);
   const [editingOptionTitle, setEditingOptionTitle] = useState('');
 
@@ -210,7 +211,23 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
         pollAnalysis(); // keep polling
       } else {
         setAnalyzing(false);
-        if (status.analysis) setAiAnalysis(status.analysis);
+        if (status.analysis) {
+          setAiAnalysis(status.analysis);
+          // Parse alternatives from the analysis text
+          const lines = status.analysis.split('\n');
+          const alts: string[] = [];
+          let inAlt = false;
+          for (const line of lines) {
+            const t = line.trim();
+            if (/^#{1,3}\s*(Альтернативы|Alternatives)/i.test(t)) { inAlt = true; continue; }
+            if (/^#{1,3}\s/.test(t) && inAlt) { inAlt = false; }
+            if (inAlt && /^[-*]\s+/.test(t)) {
+              const clean = t.replace(/^[-*]\s+/, '').replace(/\*\*/g, '').trim();
+              if (clean.length > 5) alts.push(clean);
+            }
+          }
+          setAiAlternatives(alts);
+        }
       }
     }, 3000);
   }, [detail.id]);
@@ -232,6 +249,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     setAiAnalysis(null);
     setAiError('');
     setAnalyzing(false);
+    setAiAlternatives([]);
     getAnalysisStatus(detail.id).then(s => {
       if (s.analyzing) { setAnalyzing(true); pollAnalysis(); }
       else if (s.analysis) setAiAnalysis(s.analysis);
@@ -239,11 +257,13 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     return () => { if (analysisTimer.current) clearTimeout(analysisTimer.current); };
   }, [detail.id, pollAnalysis]);
 
-  const handleSaveContext = useCallback(() => {
-    const nv = [...contextVersions, editingContext];
-    setContextVersions(nv);
-    setIsEditingContext(false);
-  }, [editingContext, contextVersions]);
+  const handleSaveContext = useCallback(async () => {
+    try {
+      await updateDecision(detail.id, { context: editingContext });
+      setContextVersions([...contextVersions, editingContext]);
+      setIsEditingContext(false);
+    } catch (err) { console.error('Context save error:', err); }
+  }, [editingContext, contextVersions, detail]);
 
   // ─── Styles ─────────────────────────────────────────────
   const isModal = mode === 'modal';
@@ -358,14 +378,17 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           <Section title="Контекст" accent="#1890ff">
             {isEditingContext ? (
               <div>
-                <textarea value={editingContext} onChange={e => setEditingContext(e.target.value)} style={{
+                <textarea value={editingContext} onChange={e => setEditingContext(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); handleSaveContext(); } }}
+                  style={{
                   width: '100%', minHeight: '80px', padding: '8px',
                   border: '1px solid #1890ff', borderRadius: '4px',
                   fontSize: '13px', fontFamily: 'inherit', boxSizing: 'border-box',
                 }} autoFocus />
-                <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                <div style={{ display: 'flex', gap: '6px', marginTop: '6px', alignItems: 'center' }}>
                   <button onClick={handleSaveContext} style={btnPrimary}>Сохранить</button>
                   <button onClick={() => setIsEditingContext(false)} style={btnSecondary}>Отмена</button>
+                  <span style={{ fontSize: '10px', color: '#999', marginLeft: '4px' }}>Ctrl+Enter — быстрое сохранение</span>
                 </div>
               </div>
             ) : (
@@ -514,6 +537,39 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 <button onClick={handleAnalyze} style={{
                   ...btnLink, marginTop: '6px', color: '#fa541c',
                 }}>🔄 Обновить анализ</button>
+                {aiAlternatives.length > 0 && (
+                  <div style={{ marginTop: '10px', padding: '8px', background: '#f0f5ff', borderRadius: '4px', border: '1px solid #adc6ff' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#2f54eb', marginBottom: '6px' }}>
+                      💡 Предложенные альтернативы:
+                    </div>
+                    {aiAlternatives.map((alt, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '4px', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '11px', color: '#333', flex: 1, lineHeight: 1.4 }}>{alt}</span>
+                        <button onClick={async () => {
+                          const usedLetters = new Set(allOptions.map(o => o.letter));
+                          let nextLetter = '';
+                          for (let j = 65; j <= 90; j++) {
+                            const l = String.fromCharCode(j);
+                            if (!usedLetters.has(l)) { nextLetter = l; break; }
+                          }
+                          if (!nextLetter) nextLetter = String.fromCharCode(65 + allOptions.length);
+                          try {
+                            const opt = await addCustomOptionApi(detail.id, nextLetter, alt);
+                            onCustomOptionsChange([...customOptions, opt]);
+                            // Remove from alternatives list
+                            setAiAlternatives(prev => prev.filter((_, idx) => idx !== i));
+                          } catch (err) { console.error('Add alt as option:', err); }
+                        }} style={{
+                          border: '1px solid #52c41a', background: '#f6ffed', color: '#389e0d',
+                          borderRadius: '3px', padding: '2px 6px', fontSize: '10px',
+                          cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                        }} title="Добавить как вариант в карточку">
+                          + вариант
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               <div>

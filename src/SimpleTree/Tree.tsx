@@ -12,6 +12,7 @@ import styles from './styles.module.css';
 export interface TreeProps extends SimpleTreeProps {
   className?: string;
   edgePoints?: Map<string, import('./types').Point[]>;
+  phaseBands?: any[];
   onDeselect?: () => void;
 }
 
@@ -29,6 +30,7 @@ export const Tree: React.FC<TreeProps> = ({
   onAddConnection,
   onDeleteConnection,
   edgePoints,
+  phaseBands,
   pendingNewNode,
   onDeselect,
   className,
@@ -214,10 +216,11 @@ export const Tree: React.FC<TreeProps> = ({
     announce('Connection cancelled. Click a node to start a new connection.');
   }, [announce]);
 
-  // Open modal automatically for pending new node
+  // Open modal automatically for pending new node + select it
   useEffect(() => {
     if (pendingNewNode) {
       setEditingNode(pendingNewNode);
+      setSelectedNodeId(pendingNewNode.id);
     }
   }, [pendingNewNode]);
 
@@ -453,6 +456,42 @@ export const Tree: React.FC<TreeProps> = ({
               }
             }}
           />
+          {/* Phase background bands */}
+          {phaseBands && phaseBands.length > 0 && (
+            <>
+              {phaseBands.map((band: any) => (
+                <div key={`phase-${band.phase}`} style={{
+                  position: 'absolute',
+                  left: -2000,
+                  top: band.y,
+                  width: 6000,
+                  height: band.height,
+                  background: band.bg,
+                  borderTop: `1px solid ${band.color}`,
+                  pointerEvents: 'none',
+                  zIndex: 0,
+                }}>
+                  <div style={{
+                    position: 'sticky',
+                    left: '8px',
+                    top: '6px',
+                    width: 'fit-content',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: band.color,
+                    opacity: 0.7,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                    whiteSpace: 'nowrap',
+                    pointerEvents: 'none',
+                    zIndex: 1,
+                  }}>
+                    {band.name}
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
           <svg
             className={styles.connectionLayer}
             width={bounds.width}

@@ -12,7 +12,8 @@ export interface TreeNode {
   status?: string;
   icon?: string;
   description?: string;
-  nodeType?: 'requirement' | 'decision' | 'task';  // ADR type
+  nodeType?: 'problem' | 'requirement' | 'paradigm' | 'decision' | 'task';  // ADR type
+  phase?: 1 | 2 | 3 | 4;  // 1=problem, 2=requirement, 3=paradigm, 4=ADR
   voteTally?: string;  // e.g. "A:4 B:2"
   voteSectors?: { option: string; weight: number; color: string }[];
   winnerVote?: string;

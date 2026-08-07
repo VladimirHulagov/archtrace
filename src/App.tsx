@@ -17,7 +17,7 @@ import { DetailPanel } from './DetailPanel';
 const STATUS_ICONS: Record<string, string> = {
   accepted: '✅', rejected: '❌', proposed: '💡', debating: '🔥', superseded: '⏭️',
 };
-const TYPE_ICONS: Record<string, string> = { requirement: '📋', decision: '⚙️', task: '🔨' };
+const TYPE_ICONS: Record<string, string> = { problem: '🔥', requirement: '📋', paradigm: '💡', decision: '⚙️', task: '🔨' };
 const VOTE_COLORS: Record<string, string> = { A: '#52c41a', B: '#fa8c16', C: '#1890ff', D: '#722ed1' };
 
 function decisionToTreeNode(d: DecisionNode): TreeNode {
@@ -38,6 +38,7 @@ function decisionToTreeNode(d: DecisionNode): TreeNode {
     id: d.id, x: 0, y: 0, text: d.title, type: 'rich', status: d.status,
     icon: STATUS_ICONS[d.status] || TYPE_ICONS[d.type] || '📄',
     description: d.type, nodeType: d.type, voteTally, voteSectors, winnerVote, options: d.options || [],
+    phase: d.phase || (d.type === 'problem' ? 1 : d.type === 'requirement' ? 2 : d.type === 'paradigm' ? 3 : 4),
   };
 }
 
@@ -76,14 +77,16 @@ function App() {
 
   // ─── ALL useCallback hooks (before any early return) ───
 
+  const [phaseBands, setPhaseBands] = useState<any[]>([]);
   const reloadGraph = useCallback(async () => {
     const graph = await fetchGraph(currentProject?.id || 1);
     const treeNodes = graph.nodes.map(decisionToTreeNode);
     const treeConnections = graph.connections.map(c => ({ id: c.id, from: c.from, to: c.to, kind: c.kind }));
-    const { nodes: positioned, edgePoints: ePoints } = calculateLayout(treeNodes, treeConnections, window.innerWidth);
+    const { nodes: positioned, edgePoints: ePoints, phaseBands: pBands } = calculateLayout(treeNodes, treeConnections, window.innerWidth);
     setNodes(positioned);
     setConnections(treeConnections);
     setEdgePoints(ePoints);
+    setPhaseBands(pBands);
   }, [currentProject]);
 
   const handleSync = useCallback(async () => {
@@ -103,12 +106,15 @@ function App() {
 
   // Create empty node and open editor modal
   const handleCreateAndEdit = useCallback(() => {
+    // Close any open dropdowns
+    setShowProjectMenu(false);
+    setShowUserMenu(false);
     const newId = `new-${nodeIdCounter.current++}`;
     const newNode: TreeNode = {
       id: newId,
       x: 400, y: 50 + nodes.length * 80,
       text: '', type: 'rich', status: 'proposed',
-      icon: '💡', description: '',
+      icon: '💡', description: '', nodeType: 'problem', phase: 1,
     };
     setPendingNewNode(newNode);
     setNodes(prev => [...prev, newNode]);
@@ -122,7 +128,8 @@ function App() {
         const result = await createDecision({
           title: updatedNode.text.trim(),
           parent: null,
-          type: 'decision',
+          type: updatedNode.nodeType || 'problem',
+          phase: updatedNode.phase || 1,
           context: updatedNode.description || undefined,
         });
         // Replace local node with real one
@@ -166,11 +173,11 @@ function App() {
       const graph = await fetchGraph(project.id);
       const treeNodes = graph.nodes.map(decisionToTreeNode);
       const treeConnections = graph.connections.map(c => ({ id: c.id, from: c.from, to: c.to, kind: c.kind }));
-      const { nodes: positioned, edgePoints: ePoints } = calculateLayout(treeNodes, treeConnections, window.innerWidth);
-      setNodes(positioned); setConnections(treeConnections); setEdgePoints(ePoints);
+      const { nodes: positioned, edgePoints: ePoints, phaseBands: pBands } = calculateLayout(treeNodes, treeConnections, window.innerWidth);
+      setNodes(positioned); setConnections(treeConnections); setEdgePoints(ePoints); setPhaseBands(pBands);
     } catch (err) {
       // If fails, show empty tree
-      setNodes([]); setConnections([]); setEdgePoints(new Map());
+      setNodes([]); setConnections([]); setEdgePoints(new Map()); setPhaseBands([]);
     }
   }, []);
 
@@ -258,14 +265,14 @@ function App() {
   }, [currentProject, selectedDetail]);
 
   const handleNodeClick = useCallback((node: TreeNode) => {
-    fetch(`/api/decisions/${node.id}`).then(r => r.json()).then(data => {
+    fetch(`/api/decisions/${node.id}?projectId=${currentProject?.id || 1}`).then(r => r.json()).then(data => {
       setSelectedDetail(data);
       setComments([]); setVotes([]); setCustomOptions([]);
       fetchComments(node.id).then(setComments).catch(() => {});
       fetchVotes(node.id).then(setVotes).catch(() => {});
       fetchCustomOptions(node.id).then(setCustomOptions).catch(() => {});
     }).catch(() => setSelectedDetail(null));
-  }, []);
+  }, [currentProject]);
 
   // ─── Fetch graph on mount ──────────────────────────────
 
@@ -285,8 +292,8 @@ function App() {
     fetchGraph(initialPid).then((graph: Graph) => {
       const treeNodes = graph.nodes.map(decisionToTreeNode);
       const treeConnections = graph.connections.map(c => ({ id: c.id, from: c.from, to: c.to, kind: c.kind }));
-      const { nodes: positioned, edgePoints: ePoints } = calculateLayout(treeNodes, treeConnections, window.innerWidth);
-      setNodes(positioned); setConnections(treeConnections); setEdgePoints(ePoints); setLoading(false);
+      const { nodes: positioned, edgePoints: ePoints, phaseBands: pBands } = calculateLayout(treeNodes, treeConnections, window.innerWidth);
+      setNodes(positioned); setConnections(treeConnections); setEdgePoints(ePoints); setPhaseBands(pBands); setLoading(false);
 
       // Restore selected node
       if (initialNode) {
@@ -361,7 +368,7 @@ function App() {
       )}
 
       {/* Project selector — top-left */}
-      <div style={{ position: 'fixed', top: '12px', left: '16px', zIndex: 1000 }}>
+      <div style={{ position: 'fixed', top: '12px', left: '16px', zIndex: 1001 }}>
         <button
           onClick={() => setShowProjectMenu(!showProjectMenu)}
           style={{
@@ -438,6 +445,7 @@ function App() {
         <Tree
           nodes={nodes} connections={connections}
           pendingNewNode={pendingNewNode}
+          phaseBands={phaseBands}
           onNodeDrag={handleNodeDrag} onAddNode={handleAddNode}
           onDeleteNode={handleDeleteNode} onUpdateNode={handleUpdateNode}
           onAddConnection={handleAddConnection} onDeleteConnection={handleDeleteConnection}
@@ -596,10 +604,12 @@ function CreateDecisionForm({ nodes, onClose, onCreated }: {
       const options = [];
       if (optionA.trim()) options.push({ letter: 'A', title: optionA.trim() });
       if (optionB.trim()) options.push({ letter: 'B', title: optionB.trim() });
+      const phaseMap: Record<string, number> = { problem: 1, requirement: 2, paradigm: 3, decision: 4, task: 4 };
       await createDecision({
         title: title.trim(),
         parent: parent || null,
         type,
+        phase: phaseMap[type] || 4,
         context: context.trim() || undefined,
         options: options.length > 0 ? options : undefined,
         decision: decision.trim() || undefined,
@@ -654,9 +664,10 @@ function CreateDecisionForm({ nodes, onClose, onCreated }: {
           <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Тип</label>
           <select value={type} onChange={e => setType(e.target.value)}
             style={{ width: '100%', padding: '8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '14px', boxSizing: 'border-box' }}>
-            <option value="decision">Решение</option>
-            <option value="requirement">Требование</option>
-            <option value="task">Задача</option>
+            <option value="problem">🔥 Проблема (Фаза 1)</option>
+            <option value="requirement">📋 Требование (Фаза 2)</option>
+            <option value="paradigm">💡 Концепция/Парадигма (Фаза 3)</option>
+            <option value="decision">⚙️ Решение (Фаза 4)</option>
           </select>
         </div>
 
