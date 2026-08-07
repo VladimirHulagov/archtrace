@@ -313,6 +313,16 @@ export async function revertGit(): Promise<{ success: boolean; message: string; 
 
 // ─── AI Analysis ──────────────────────────────────────────
 
+export async function suggestSection(nodeId: string, section: 'context' | 'options' | 'consequences'): Promise<{ content: string; alternatives?: string[] }> {
+  const res = await fetch(`${API_BASE}/decisions/${nodeId}/suggest`, {
+    method: 'POST',
+    headers: jsonHeaders(),
+    body: JSON.stringify({ section }),
+  });
+  if (!res.ok) throw new Error('Suggestion failed');
+  return res.json();
+}
+
 export async function startAnalysis(nodeId: string): Promise<{ status: string }> {
   const res = await fetch(`${API_BASE}/decisions/${nodeId}/analyze`, {
     method: 'POST',

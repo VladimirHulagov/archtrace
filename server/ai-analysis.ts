@@ -153,6 +153,51 @@ function buildAdrPrompt(ctx: AnalysisContext): string {
   return prompt;
 }
 
+export async function runSectionSuggestion(params: {
+  section: 'context' | 'options' | 'consequences';
+  title: string;
+  currentContent: string;
+  phase: number;
+}): Promise<{ content: string; alternatives?: string[] }> {
+  const { section, title, currentContent, phase } = params;
+
+  const sectionLabels: Record<string, string> = {
+    context: 'контекст',
+    options: 'варианты решения',
+    consequences: 'последствия',
+  };
+
+  let prompt = `Ты — архитектор. Для архитектурного решения "${title}" предложи дополнения для секции "${sectionLabels[section]}".\n\n`;
+  if (currentContent?.trim()) {
+    prompt += `Текущее содержание:\n${currentContent}\n\n`;
+    prompt += `Предложи ДОПОЛНЕНИЯ к существующему тексту. Не повторяй то, что уже есть.\n\n`;
+  } else {
+    prompt += `Содержание пока пустое. Предложи полноценный текст.\n\n`;
+  }
+  prompt += `Формат: структурированный markdown. Для секции "варианты" используй формат:\n### Option A: Название\nОписание\n### Option B: Название\nОписание\n\n`;
+  prompt += `Отвечай на русском. Максимум 200 слов.`;
+
+  const requestBody = JSON.stringify({
+    model: MODEL,
+    messages: [
+      { role: 'system', content: 'Ты — старший архитектор. Помогаешь оформить архитектурные решения. Отвечаешь на русском.' },
+      { role: 'user', content: prompt },
+    ],
+    temperature: 0.8,
+    max_tokens: 2000,
+  });
+
+  const response = await callZai(requestBody);
+
+  // For options section, also extract alternatives
+  let alternatives: string[] | undefined;
+  if (section === 'options') {
+    alternatives = extractAlternatives(response);
+  }
+
+  return { content: response, alternatives };
+}
+
 async function callZai(body: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const options: https.RequestOptions = {

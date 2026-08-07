@@ -15,14 +15,14 @@ import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { buildGraph, tallyVotes, generateAdrMarkdown, parseBodySections, type DecisionNode } from './parse.js';
 import { loadConfig, saveConfig, type ArchTraceConfig } from './config.js';
-import { runArchitecturalAnalysis } from './ai-analysis.js';
+import { runArchitecturalAnalysis, runSectionSuggestion } from './ai-analysis.js';
 import { syncRepo, isRepoReady, getActiveDecisionsDir, pushChanges } from './git-sync.js';
 import {
   getComments, addComment, deleteComment, updateComment,
   getVotes, castVote, removeVote,
   toggleReaction,
   updateCustomOption,
-  getCustomOptions, addCustomOption,
+  getCustomOptions, addCustomOption, deleteCustomOption,
   getOrCreateUser, getUserById, getProjects, createProject,
   checkDb,
   query,
@@ -272,6 +272,39 @@ app.post('/api/git-revert', async (req, res) => {
       message: `Reverted ${oldHash} → ${newHash}`,
       commitHash: newHash,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Section Suggestion (AI per-section) ──────────────────
+
+app.post('/api/decisions/:id/suggest', async (req, res) => {
+  try {
+    const { section } = req.body;
+    if (!section || !['context', 'options', 'consequences'].includes(section)) {
+      return res.status(400).json({ error: 'Invalid section' });
+    }
+
+    const projectId = getProjectId(req);
+    const dir = await projectDecisionsDir(projectId);
+    const graph = buildGraph(dir);
+    const node = graph.nodes.find(n => n.id === req.params.id);
+    if (!node) return res.status(404).json({ error: 'Decision not found' });
+
+    const sections = parseBodySections(node.body);
+    const currentContent = section === 'context' ? sections.context
+      : section === 'options' ? sections.options
+      : sections.consequences;
+
+    const result = await runSectionSuggestion({
+      section,
+      title: node.title,
+      currentContent,
+      phase: node.phase || 4,
+    });
+
+    res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -545,6 +578,20 @@ app.put('/api/options/:nodeId/:letter', async (req, res) => {
     );
     if (!result) return res.status(404).json({ error: 'Option not found' });
     res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/options/:nodeId/:letter
+ * Delete a custom option.
+ */
+app.delete('/api/options/:nodeId/:letter', async (req, res) => {
+  try {
+    const deleted = await deleteCustomOption(req.params.nodeId, getProjectId(req), req.params.letter.toUpperCase());
+    if (!deleted) return res.status(404).json({ error: 'Option not found' });
+    res.status(204).end();
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

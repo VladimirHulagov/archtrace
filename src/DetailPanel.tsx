@@ -10,7 +10,7 @@ import {
   postComment, deleteCommentApi, castVoteApi, removeVoteApi, addCustomOptionApi, updateCustomOptionApi,
   updateCommentApi,
   updateDecision,
-  startAnalysis, getAnalysisStatus,
+  startAnalysis, getAnalysisStatus, suggestSection,
   reactToComment,
 } from './api';
 
@@ -72,6 +72,9 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const [editingOptionTitle, setEditingOptionTitle] = useState('');
   const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
   const [editingCommentText, setEditingCommentText] = useState('');
+  const [suggestingSection, setSuggestingSection] = useState<string | null>(null);
+  const [suggestedContent, setSuggestedContent] = useState<string>('');
+  const [suggestError, setSuggestError] = useState('');
 
   // ─── Resize logic ───────────────────────────────────────
   const isResizing = useRef(false);
@@ -201,6 +204,26 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     } catch (err) { console.error('Update option error:', err); }
     setEditingOptionLetter(null); setEditingOptionTitle('');
   }, [editingOptionTitle, detail, customOptions, onCustomOptionsChange]);
+
+  // ─── Section AI suggestion handler ──────────────────────
+  const handleSuggest = useCallback(async (section: 'context' | 'options' | 'consequences') => {
+    setSuggestingSection(section);
+    setSuggestedContent('');
+    setSuggestError('');
+    try {
+      const result = await suggestSection(detail.id, section);
+      setSuggestedContent(result.content);
+      // Enter edit mode for the section
+      if (section === 'context') {
+        setEditingContext(sections.context || '');
+        setIsEditingContext(true);
+      }
+    } catch (err: any) {
+      setSuggestError(err.message);
+    } finally {
+      setSuggestingSection(null);
+    }
+  }, [detail.id, sections.context]);
 
   // ─── Title edit handler ────────────────────────────────
 
@@ -399,7 +422,18 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           </div>
 
           {/* КОНТЕКСТ */}
-          <Section title="Контекст" accent="#1890ff">
+          <Section title="Контекст" accent="#1890ff"
+            extra={(
+              <button
+                onClick={() => handleSuggest('context')}
+                disabled={suggestingSection === 'context'}
+                title="AI: дополнить контекст"
+                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '14px', padding: '0 2px', opacity: suggestingSection === 'context' ? 0.5 : 0.6 }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                onMouseLeave={e => e.currentTarget.style.opacity = suggestingSection === 'context' ? '0.5' : '0.6'}
+              >{suggestingSection === 'context' ? '⏳' : '🪄'}</button>
+            )}
+          >
             {isEditingContext ? (
               <div>
                 <textarea value={editingContext} onChange={e => setEditingContext(e.target.value)}
@@ -414,6 +448,23 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                   <button onClick={() => setIsEditingContext(false)} style={btnSecondary}>Отмена</button>
                   <span style={{ fontSize: '10px', color: '#999', marginLeft: '4px' }}>Ctrl+Enter — быстрое сохранение</span>
                 </div>
+                {suggestingSection === null && suggestedContent && (
+                  <div style={{ marginTop: '8px', padding: '8px', background: '#f0f5ff', borderRadius: '4px', border: '1px solid #adc6ff' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#2f54eb' }}>🪄 AI-предложение:</span>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <button onClick={() => { setEditingContext(prev => (prev ? prev + '\n\n' : '') + suggestedContent); }} style={{ border: '1px solid #52c41a', background: '#f6ffed', color: '#389e0d', borderRadius: '3px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}>+ Добавить</button>
+                        <button onClick={() => setSuggestedContent('')} style={{ border: '1px solid #d0d0d0', background: '#fff', color: '#666', borderRadius: '3px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}>Отклонить</button>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#333', lineHeight: 1.5 }}>
+                      <ReactMarkdown>{suggestedContent}</ReactMarkdown>
+                    </div>
+                  </div>
+                )}
+                {suggestError && suggestingSection === null && (
+                  <div style={{ color: '#ff4d4f', fontSize: '11px', marginTop: '4px' }}>{suggestError}</div>
+                )}
               </div>
             ) : (
               <div>
@@ -437,7 +488,18 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           </Section>
 
           {/* ОПЦИИ */}
-          <Section title="Опции" accent="#722ed1">
+          <Section title="Опции" accent="#722ed1"
+            extra={(
+              <button
+                onClick={() => handleSuggest('options')}
+                disabled={suggestingSection === 'options'}
+                title="AI: предложить варианты"
+                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '14px', padding: '0 2px', opacity: suggestingSection === 'options' ? 0.5 : 0.6 }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                onMouseLeave={e => e.currentTarget.style.opacity = suggestingSection === 'options' ? '0.5' : '0.6'}
+              >{suggestingSection === 'options' ? '⏳' : '🪄'}</button>
+            )}
+          >
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' }}>
               {allOptions.map(opt => {
                 const isSel = selectedOption === opt.letter;
@@ -475,6 +537,18 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                     )}
                     {w > 0 && <span style={{ padding: '2px 8px', borderRadius: '10px', background: color + '20', color, fontSize: '11px', fontWeight: 'bold' }}>{w}</span>}
                     {isVoted && <span style={{ fontSize: '14px' }}>✅</span>}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); if (confirm(`Удалить вариант ${opt.letter}?`)) {
+                        // Delete custom option via API
+                        fetch(`/api/options/${detail.id}/${opt.letter}`, { method: 'DELETE', headers: { 'X-Project-Id': String(1) } })
+                          .then(() => onCustomOptionsChange(customOptions.filter(o => o.letter !== opt.letter)))
+                          .catch(err => console.error('Delete option:', err));
+                      } }}
+                      title="Удалить вариант"
+                      style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#cc4444', fontSize: '12px', padding: '0', marginLeft: '2px', flexShrink: 0, opacity: 0.5 }}
+                      onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                      onMouseLeave={e => e.currentTarget.style.opacity = '0.5'}
+                    >✕</button>
                   </div>
                 );
               })}
@@ -491,7 +565,42 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 </div>
               </div>
             ) : (
-              <button onClick={() => setShowAddOption(true)} style={{ ...btnLink, marginBottom: '8px' }}>+ Добавить вариант</button>
+              <>
+                <button onClick={() => setShowAddOption(true)} style={{ ...btnLink, marginBottom: '8px' }}>+ Добавить вариант</button>
+            {suggestingSection === null && suggestedContent && (
+              <div style={{ marginTop: '8px', padding: '8px', background: '#f0f5ff', borderRadius: '4px', border: '1px solid #adc6ff' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#2f54eb' }}>🪄 AI-варианты:</span>
+                  <button onClick={() => setSuggestedContent('')} style={{ border: '1px solid #d0d0d0', background: '#fff', color: '#666', borderRadius: '3px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}>Закрыть</button>
+                </div>
+                <div style={{ fontSize: '12px', color: '#333', lineHeight: 1.5, marginBottom: '6px' }}>
+                  <ReactMarkdown>{suggestedContent}</ReactMarkdown>
+                </div>
+                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                  {(suggestedContent.match(/Option [A-Z]/g) || []).map((match, i) => {
+                    const letter = match.match(/([A-Z])/)?.[1] || String.fromCharCode(65 + i);
+                    // Extract title from "### Option X: Title"
+                    const titleMatch = suggestedContent.match(new RegExp(`Option ${letter}[:\\s]*([^\\n#]+)`));
+                    const title = titleMatch ? titleMatch[1].trim() : match;
+                    return (
+                      <button key={i} onClick={async () => {
+                        const usedLetters = new Set(allOptions.map(o => o.letter));
+                        let nextLetter = '';
+                        for (let j = 65; j <= 90; j++) { const l = String.fromCharCode(j); if (!usedLetters.has(l)) { nextLetter = l; break; } }
+                        if (!nextLetter) nextLetter = String.fromCharCode(65 + allOptions.length);
+                        try {
+                          const opt = await addCustomOptionApi(detail.id, nextLetter, title);
+                          onCustomOptionsChange([...customOptions, opt]);
+                        } catch (err) { console.error('Add AI option:', err); }
+                      }} style={{ border: '1px solid #52c41a', background: '#f6ffed', color: '#389e0d', borderRadius: '3px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}>
+                        + {title.substring(0, 30)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            </>
             )}
 
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -536,13 +645,22 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           )}
 
           {/* ПОСЛЕДСТВИЯ */}
-          {sections.consequences && (
-            <Section title="Последствия" accent="#fa8c16">
+          <Section title="Последствия" accent="#fa8c16"
+            extra={(
+              <button
+                onClick={() => handleSuggest('consequences')}
+                disabled={suggestingSection === 'consequences'}
+                title="AI: дополнить последствия"
+                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '14px', padding: '0 2px', opacity: suggestingSection === 'consequences' ? 0.5 : 0.6 }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                onMouseLeave={e => e.currentTarget.style.opacity = suggestingSection === 'consequences' ? '0.5' : '0.6'}
+              >{suggestingSection === 'consequences' ? '⏳' : '🪄'}</button>
+            )}
+          >
               <div style={{ fontSize: '13px', lineHeight: 1.6, color: '#333' }}>
                 <ReactMarkdown>{sections.consequences}</ReactMarkdown>
               </div>
             </Section>
-          )}
 
           {/* ─── AI АНАЛИЗ ─────────────────────────────────── */}
           <Section title="🔥 AI-анализ" accent="#fa541c">
@@ -737,11 +855,12 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
 // ─── Helpers ───────────────────────────────────────────────
 
-const Section: React.FC<{ title: string; accent: string; children: React.ReactNode }> = ({ title, accent, children }) => (
+const Section: React.FC<{ title: string; accent: string; children: React.ReactNode; extra?: React.ReactNode }> = ({ title, accent, children, extra }) => (
   <div style={{ marginBottom: '16px' }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
       <div style={{ width: '4px', height: '16px', background: accent, borderRadius: '2px' }} />
       <h4 style={{ margin: 0, fontSize: '14px', color: '#333' }}>{title}</h4>
+      {extra}
     </div>
     {children}
   </div>

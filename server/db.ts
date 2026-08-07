@@ -160,6 +160,14 @@ export async function updateComment(commentId: number, userId: number, content: 
   return rows[0] || null;
 }
 
+export async function deleteCustomOption(nodeId: string, projectId: number, letter: string): Promise<boolean> {
+  const rows = await query(
+    'DELETE FROM custom_options WHERE node_id = $1 AND project_id = $2 AND letter = $3 RETURNING id',
+    [nodeId, projectId, letter]
+  );
+  return rows.length > 0;
+}
+
 export async function deleteComment(commentId: number, userId: number): Promise<boolean> {
   const rows = await query(
     'DELETE FROM comments WHERE id = $1 AND author_id = $2 RETURNING id',
