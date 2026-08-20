@@ -215,7 +215,7 @@ export const Tree: React.FC<TreeProps> = ({
       if (conn) {
         const fromNode = nodes.find((n) => n.id === conn.from);
         const toNode = nodes.find((n) => n.id === conn.to);
-        announce(`Connection from ${fromNode?.text} to ${toNode?.text} selected`);
+        announce(`Связь: ${fromNode?.text} → ${toNode?.text}`);
       }
     },
     [connections, nodes, announce]
@@ -425,10 +425,11 @@ export const Tree: React.FC<TreeProps> = ({
 
   if (nodes.length === 0) {
     return (
+      <>
       <div className={`${styles.container} ${className || ''}`}>
         <div className={styles.empty}>
           <div className={styles.empty__icon}>+</div>
-          <h3 className={styles.empty__title}>No nodes yet</h3>
+          <h3 className={styles.empty__title}>Пока нет карточек</h3>
           <p className={styles.empty__description}>
             Click the add button to create your first node
           </p>
@@ -439,21 +440,30 @@ export const Tree: React.FC<TreeProps> = ({
               onClick={handleAddNode}
               style={{ marginTop: '16px' }}
             >
-              Add Node
+              Добавить карточку
             </button>
           )}
         </div>
       </div>
-    );
+      {editingNode && (
+        <Modal
+          node={editingNode}
+          isOpen={!!editingNode}
+          onSave={handleModalSave}
+          onCancel={handleModalCancel}
+          showCategory={editingNode.id.startsWith('new-') && !connections.some(c => c.to === editingNode.id)}
+        />
+      )}
+    </>
+  );
   }
-
   return (
     <div
       ref={containerRef}
       className={`${styles.container} ${className || ''}`}
       onClick={handleContainerClick}
       role="tree"
-      aria-label="Decision tree"
+      aria-label="Дерево решений"
     >
       <div
         ref={announcementRef}
@@ -593,6 +603,15 @@ export const Tree: React.FC<TreeProps> = ({
         onZoomReset={() => transformRef.current?.resetTransform()}
       />
       
+      {editingNode && (
+        <Modal
+          node={editingNode}
+          isOpen={!!editingNode}
+          onSave={handleModalSave}
+          onCancel={handleModalCancel}
+          showCategory={editingNode.id.startsWith('new-') && !connections.some(c => c.to === editingNode.id)}
+        />
+      )}
 
     </div>
   );

@@ -73,8 +73,9 @@
 }
 
 .node--rich {
-  width: 200px;
-  height: 120px;
+  width: 220px;
+  min-height: 120px;
+  max-height: 280px;
   padding: 0;
   overflow: hidden;
   display: flex;

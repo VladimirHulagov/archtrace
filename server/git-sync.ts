@@ -159,9 +159,9 @@ export function getActiveDecisionsDir(): string {
 /**
  * Commit and push changes back to the repo (for CRUD operations).
  */
-export function pushChanges(message: string, config?: ArchTraceConfig): SyncResult {
+export function pushChanges(message: string, config?: ArchTraceConfig, cwd?: string): SyncResult {
   const cfg = config || loadConfig();
-  const cloneDir = getCloneDir();
+  const cloneDir = cwd || getCloneDir();
   const timestamp = new Date().toISOString();
 
   try {

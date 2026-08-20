@@ -9,6 +9,8 @@ export interface ModalProps {
   onCancel: () => void;
   readOnly?: boolean;
   onEdit?: (node: TreeNode) => void;
+  /** Show category select (only for new root cards) */
+  showCategory?: boolean;
 }
 
 const STATUS_OPTIONS = [
@@ -17,6 +19,11 @@ const STATUS_OPTIONS = [
   { value: 'warning', label: 'Предупреждение' },
   { value: 'error', label: 'Ошибка' },
   { value: 'info', label: 'Информация' },
+];
+
+const CATEGORY_OPTIONS = [
+  { value: 'problem', label: '🔥 Проблема' },
+  { value: 'requirement', label: '📋 Требование' },
 ];
 
 const ICON_OPTIONS = [
@@ -28,11 +35,14 @@ const ICON_OPTIONS = [
   { value: '●', label: 'Круг' },
 ];
 
-export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel, readOnly, onEdit }) => {
+export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel, readOnly, onEdit, showCategory }) => {
   const [title, setTitle] = useState(node.text);
   const [description, setDescription] = useState(node.description || '');
   const [status, setStatus] = useState(node.status || '');
   const [icon, setIcon] = useState(node.icon || '');
+  const [category, setCategory] = useState<'problem' | 'requirement'>(
+    node.nodeType === 'requirement' ? 'requirement' : 'problem'
+  );
   
   const titleInputRef = useRef<HTMLInputElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -43,6 +53,7 @@ export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel, re
       setDescription(node.description || '');
       setStatus(node.status || '');
       setIcon(node.icon || '');
+      setCategory(node.nodeType === 'requirement' ? 'requirement' : 'problem');
       
       setTimeout(() => {
         titleInputRef.current?.focus();
@@ -62,8 +73,12 @@ export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel, re
       description: description.trim() || undefined,
       status: status || undefined,
       icon: icon || undefined,
+      ...(showCategory ? {
+        nodeType: category,
+        phase: (category === 'problem' ? 1 : 2) as TreeNode['phase'],
+      } : {}),
     });
-  }, [node, title, description, status, icon, onSave]);
+  }, [node, title, description, status, icon, onSave, showCategory, category]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -148,6 +163,24 @@ export const Modal: React.FC<ModalProps> = ({ node, isOpen, onSave, onCancel, re
               />
             )}
           </div>
+
+          {showCategory && (
+            <div className={styles.field}>
+              <label className={styles.field__label} htmlFor="node-category">Категория</label>
+              <select
+                id="node-category"
+                className={styles.field__select}
+                value={category}
+                onChange={(e) => setCategory(e.target.value as 'problem' | 'requirement')}
+              >
+                {CATEGORY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className={styles.field}>
             <label className={styles.field__label} htmlFor="node-status">Статус</label>

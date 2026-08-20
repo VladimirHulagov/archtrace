@@ -943,7 +943,10 @@ app.post('/api/projects', requireArchitect, async (req, res) => {
       // Create repo named after slug
       const result = await githubCreateRepo(token, slug, name);
       if (!result.success) {
-        return res.status(400).json({ error: `Failed to create repo: ${result.error}` });
+        const hint = /not accessible|forbidden/i.test(result.error || '')
+          ? '. У PAT нет права создавать репозитории: откройте Settings → Developer settings → Fine-grained tokens → ваш токен → Repository access: All repositories, Permissions → Administration: Read and write (содержимое/Contents уже есть).'
+          : '';
+        return res.status(400).json({ error: `Не удалось создать репозиторий: ${result.error}${hint}` });
       }
 
       // Use the returned clone URL, or construct it

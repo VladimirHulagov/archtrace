@@ -48,8 +48,8 @@ export const Controls: React.FC<ControlsProps> = ({
         type="button"
         className={styles.controls__btn}
         onClick={onAddNode}
-        title="Add node"
-        aria-label="Add node"
+        title="Добавить карточку"
+        aria-label="Добавить карточку"
       >
         <span className={styles['controls__btn--icon']}>+</span>
       </button>
@@ -59,8 +59,8 @@ export const Controls: React.FC<ControlsProps> = ({
         className={styles.controls__btn}
         onClick={onDeleteNode}
         disabled={!canDeleteNode}
-        title="Delete selected node"
-        aria-label="Delete selected node"
+        title="Удалить выбранную карточку"
+        aria-label="Удалить выбранную карточку"
       >
         <span className={styles['controls__btn--icon']}>−</span>
       </button>
@@ -69,8 +69,8 @@ export const Controls: React.FC<ControlsProps> = ({
         type="button"
         className={`${styles.controls__btn} ${isConnectingMode ? styles['controls__btn--active'] : ''}`}
         onClick={handleConnectClick}
-        title={isInConnectionProcess ? 'Cancel connection' : isConnectingMode ? 'Exit connection mode' : 'Enter connection mode'}
-        aria-label={isInConnectionProcess ? 'Cancel connection' : isConnectingMode ? 'Exit connection mode' : 'Enter connection mode'}
+        title={isInConnectionProcess ? 'Отменить связь' : isConnectingMode ? 'Выйти из режима связей' : 'Создать связь между карточками'}
+        aria-label={isInConnectionProcess ? 'Отменить связь' : isConnectingMode ? 'Выйти из режима связей' : 'Создать связь между карточками'}
         aria-pressed={isConnectingMode}
       >
         <span className={styles['controls__btn--icon']}>↔</span>
@@ -81,8 +81,8 @@ export const Controls: React.FC<ControlsProps> = ({
         className={styles.controls__btn}
         onClick={onDeleteConnection}
         disabled={!canDeleteConnection}
-        title="Delete selected connection"
-        aria-label="Delete selected connection"
+        title="Удалить выбранную связь"
+        aria-label="Удалить выбранную связь"
       >
         <span className={styles['controls__btn--icon']}>✕</span>
       </button>
@@ -94,8 +94,8 @@ export const Controls: React.FC<ControlsProps> = ({
             type="button"
             className={styles.controls__btn}
             onClick={onZoomIn}
-            title="Zoom in"
-            aria-label="Zoom in"
+            title="Увеличить"
+            aria-label="Увеличить"
           >
             <span className={styles['controls__btn--icon']}>+</span>
           </button>
@@ -104,8 +104,8 @@ export const Controls: React.FC<ControlsProps> = ({
             type="button"
             className={styles.controls__btn}
             onClick={onZoomOut}
-            title="Zoom out"
-            aria-label="Zoom out"
+            title="Уменьшить"
+            aria-label="Уменьшить"
           >
             <span className={styles['controls__btn--icon']}>−</span>
           </button>
@@ -114,8 +114,8 @@ export const Controls: React.FC<ControlsProps> = ({
             type="button"
             className={styles.controls__btn}
             onClick={onZoomReset}
-            title="Reset zoom"
-            aria-label="Reset zoom"
+            title="Сбросить масштаб"
+            aria-label="Сбросить масштаб"
           >
             <span className={styles['controls__btn--icon']}>⤄</span>
           </button>

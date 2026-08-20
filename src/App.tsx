@@ -211,9 +211,11 @@ function App() {
   const handleAddNode = useCallback((parentId?: string) => {
     const parentNode = parentId ? nodes.find(n => n.id === parentId) : null;
     const newId = `new-${nodeIdCounter.current++}`;
+    const isRoot = !parentNode;
     const newNode: TreeNode = {
       id: newId, x: parentNode ? parentNode.x + 50 : Math.floor(window.innerWidth / 2) - 100, y: parentNode ? parentNode.y + 150 : 50 + nodes.length * 80,
-      text: '', type: 'rich', status: 'proposed', icon: '💡', description: '', nodeType: 'decision', phase: 4,
+      text: '', type: 'rich', status: 'proposed', icon: '💡', description: '',
+      nodeType: isRoot ? 'problem' : 'decision', phase: isRoot ? 1 : 4,
     };
     setPendingNewNode(newNode);
     setNodes(prev => [...prev, newNode]);
@@ -473,9 +475,9 @@ function App() {
       )}
 
       {/* Project selector — top-left */}
-      <div style={{ position: 'fixed', top: '12px', left: '16px', zIndex: 500 }}>
+      <div style={{ position: 'fixed', top: '12px', left: '16px', zIndex: 510 }}>
         <button
-          onClick={() => setShowProjectMenu(!showProjectMenu)}
+          onClick={() => { setShowUserMenu(false); setShowProjectMenu(!showProjectMenu); }}
           style={{
             border: '1px solid #d0d0d0', background: '#fff', borderRadius: '4px',
             padding: '6px 14px', cursor: 'pointer', fontSize: '13px', color: '#333',
@@ -516,7 +518,7 @@ function App() {
       {/* User / Auth — left, below project selector */}
       <div style={{ position: 'fixed', top: '48px', left: '16px', zIndex: 500 }}>
         <button
-          onClick={() => currentUser ? setShowUserMenu(!showUserMenu) : setShowLoginModal(true)}
+          onClick={() => { if (currentUser) { setShowProjectMenu(false); setShowUserMenu(!showUserMenu); } else setShowLoginModal(true); }}
           style={{
             border: '1px solid #d0d0d0', background: '#fff', borderRadius: '4px',
             padding: '6px 14px', cursor: 'pointer', fontSize: '13px', color: '#333',

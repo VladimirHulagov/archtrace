@@ -256,7 +256,11 @@ export async function createProjectApi(data: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error('Failed to create project');
+  if (!res.ok) {
+    let msg = `Не удалось создать проект (HTTP ${res.status})`;
+    try { const j = await res.json(); if (j.error) msg = j.error; } catch {}
+    throw new Error(msg);
+  }
   return res.json();
 }
 
