@@ -5,13 +5,16 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
-import type { DecisionNode, Comment, Vote, CustomOption } from './api';
+import type { DecisionNode, Comment, Vote } from './api';
 import {
   postComment, deleteCommentApi, castVoteApi, removeVoteApi, addCustomOptionApi, updateCustomOptionApi,
   updateCommentApi,
   updateDecision,
   startAnalysis, getAnalysisStatus, suggestSection,
   reactToComment,
+  fetchHistory,
+  type HistoryEntry,
+  authFetch,
 } from './api';
 
 const STATUS_ICONS: Record<string, string> = {
@@ -35,21 +38,22 @@ export interface DetailPanelProps {
   detail: DecisionNode;
   comments: Comment[];
   votes: Vote[];
-  customOptions: CustomOption[];
-  currentUserId: number;
+  currentUserId: number | null;
   currentRole: string;
   onCommentsChange: (c: Comment[]) => void;
   onVotesChange: (v: Vote[]) => void;
-  onCustomOptionsChange: (o: CustomOption[]) => void;
+  onOptionsChange?: () => void; // callback to refetch detail when options change
+  onTitleChange?: (newTitle: string) => void; // callback to update parent state after title edit
+  onBodyChange?: (newBody: string) => void; // callback to update parent state after body/context edit
   onClose: () => void;
   onDeleteNode?: () => void;
   initialMode?: 'sidebar' | 'modal';
 }
 
 export const DetailPanel: React.FC<DetailPanelProps> = ({
-  detail, comments, votes, customOptions,
+  detail, comments, votes,
   currentUserId, currentRole,
-  onCommentsChange, onVotesChange, onCustomOptionsChange, onClose, onDeleteNode, initialMode,
+  onCommentsChange, onVotesChange, onOptionsChange, onTitleChange, onBodyChange, onClose, onDeleteNode, initialMode,
 }) => {
   const [mode, setMode] = useState<PanelMode>(initialMode || 'sidebar');
   const [width, setWidth] = useState(420);
@@ -59,8 +63,9 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const [newOptionTitle, setNewOptionTitle] = useState('');
   const [isEditingContext, setIsEditingContext] = useState(false);
   const [editingContext, setEditingContext] = useState('');
-  const [contextVersions, setContextVersions] = useState<string[]>([]);
-  const [showContextHistory, setShowContextHistory] = useState(false);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitle, setEditingTitle] = useState('');
   const [commentSort, setCommentSort] = useState<CommentSort>('date');
@@ -74,6 +79,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const [editingCommentText, setEditingCommentText] = useState('');
   const [suggestingSection, setSuggestingSection] = useState<string | null>(null);
   const [suggestedContent, setSuggestedContent] = useState<string>('');
+  const [suggestedSectionName, setSuggestedSectionName] = useState<'context' | 'options' | 'consequences' | null>(null);
   const [suggestError, setSuggestError] = useState('');
 
   // ─── Resize logic ───────────────────────────────────────
@@ -105,10 +111,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const sections = parseAdrBody(detail.body);
 
   // ─── Compute vote data ──────────────────────────────────
-  const allOptions = useMemo(() => [
-    ...(detail.options || []),
-    ...customOptions.map(o => ({ letter: o.letter, title: o.title })),
-  ], [detail.options, customOptions]);
+  const allOptions = useMemo(() => [...(detail.options || [])].sort((a, b) => a.letter.localeCompare(b.letter)), [detail.options]);
 
   const userVote = votes.find(v => v.user_id === currentUserId);
   const voteTally: Record<string, number> = {};
@@ -132,7 +135,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     if (!selectedOption) return;
     try {
       const w = currentRole === 'architect' ? 3 : currentRole === 'senior' ? 2 : 1;
-      const v = await castVoteApi(detail.id, selectedOption, w, undefined, currentUserId);
+      const v = await castVoteApi(detail.id, selectedOption, w);
       onVotesChange([...votes.filter(x => x.user_id !== v.user_id), v]);
       setSelectedOption(null);
     } catch (err) { console.error('Vote error:', err); }
@@ -140,7 +143,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
   const handleRemoveVote = useCallback(async () => {
     try {
-      await removeVoteApi(detail.id, currentUserId);
+      await removeVoteApi(detail.id);
       onVotesChange(votes.filter(v => v.user_id !== currentUserId));
     } catch (err) { console.error('Remove vote error:', err); }
   }, [detail, votes, onVotesChange]);
@@ -148,7 +151,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const handlePostComment = useCallback(async () => {
     if (!commentText.trim()) return;
     try {
-      const c = await postComment(detail.id, commentText.trim(), undefined, currentUserId);
+      const c = await postComment(detail.id, commentText.trim());
       onCommentsChange([...comments, c]);
       setCommentText('');
     } catch (err) { console.error('Comment error:', err); }
@@ -170,7 +173,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
   const handleReact = useCallback(async (commentId: number, reaction: 'like' | 'dislike') => {
     try {
-      const result = await reactToComment(commentId, reaction, currentUserId);
+      const result = await reactToComment(commentId, reaction);
       onCommentsChange(comments.map(c =>
         c.id === commentId
           ? { ...c, likes: result.likes, dislikes: result.dislikes, user_reaction: result.userReaction }
@@ -190,20 +193,20 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     }
     if (!nextLetter) nextLetter = String.fromCharCode(65 + allOptions.length);
     try {
-      const opt = await addCustomOptionApi(detail.id, nextLetter, newOptionTitle.trim());
-      onCustomOptionsChange([...customOptions, opt]);
+      await addCustomOptionApi(detail.id, nextLetter, newOptionTitle.trim());
+      onOptionsChange?.();
       setNewOptionTitle(''); setShowAddOption(false);
     } catch (err) { console.error('Add option error:', err); }
-  }, [newOptionTitle, detail, customOptions, onCustomOptionsChange, allOptions]);
+  }, [newOptionTitle, detail, onOptionsChange, allOptions]);
 
   const handleUpdateOption = useCallback(async (letter: string) => {
     if (!editingOptionTitle.trim()) { setEditingOptionLetter(null); return; }
     try {
-      const updated = await updateCustomOptionApi(detail.id, letter, editingOptionTitle.trim());
-      onCustomOptionsChange(customOptions.map(o => o.letter === letter ? updated : o));
+      await updateCustomOptionApi(detail.id, letter, editingOptionTitle.trim());
+      onOptionsChange?.();
     } catch (err) { console.error('Update option error:', err); }
     setEditingOptionLetter(null); setEditingOptionTitle('');
-  }, [editingOptionTitle, detail, customOptions, onCustomOptionsChange]);
+  }, [editingOptionTitle, detail, onOptionsChange]);
 
   // ─── Section AI suggestion handler ──────────────────────
   const handleSuggest = useCallback(async (section: 'context' | 'options' | 'consequences') => {
@@ -213,6 +216,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     try {
       const result = await suggestSection(detail.id, section);
       setSuggestedContent(result.content);
+      setSuggestedSectionName(section);
     } catch (err: any) {
       setSuggestError(err.message || 'Ошибка AI');
     } finally {
@@ -226,10 +230,10 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     if (!editingTitle.trim()) { setIsEditingTitle(false); return; }
     try {
       await updateDecision(detail.id, { title: editingTitle.trim() });
-      // Update is local — graph reload will pick up the change from git
-      setIsEditingTitle(false);
+      if (onTitleChange) onTitleChange(editingTitle.trim());
     } catch (err) { console.error('Title update error:', err); }
-  }, [editingTitle, detail]);
+    finally { setIsEditingTitle(false); }
+  }, [editingTitle, detail, onTitleChange]);
 
   // ─── AI Analysis handler ────────────────────────────────
 
@@ -289,6 +293,21 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     return () => { if (analysisTimer.current) clearTimeout(analysisTimer.current); };
   }, [detail.id, pollAnalysis]);
 
+  // ─── Load git history ──────────────────────────────────
+  const loadHistory = useCallback(async () => {
+    setLoadingHistory(true);
+    try {
+      const entries = await fetchHistory(detail.id);
+      setHistory(entries);
+    } catch (err) { console.error('History load error:', err); }
+    setLoadingHistory(false);
+  }, [detail.id]);
+
+  useEffect(() => {
+    setHistory([]);
+    setShowHistory(false);
+  }, [detail.id]);
+
   const handleApplySuggestion = useCallback(async (section: 'context' | 'options' | 'consequences') => {
     if (!suggestedContent) return;
     try {
@@ -296,20 +315,20 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
         const existing = sections.context || '';
         const merged = existing ? existing + '\n\n' + suggestedContent : suggestedContent;
         await updateDecision(detail.id, { context: merged });
-        // Update local state
-        sections.context = merged;
+        if (onOptionsChange) onOptionsChange();
       }
       setSuggestedContent('');
+      setSuggestedSectionName(null);
     } catch (err) { console.error('Apply suggestion error:', err); }
-  }, [suggestedContent, detail.id, sections]);
+  }, [suggestedContent, detail.id, sections, onOptionsChange]);
 
   const handleSaveContext = useCallback(async () => {
     try {
       await updateDecision(detail.id, { context: editingContext });
-      setContextVersions([...contextVersions, editingContext]);
+      if (onOptionsChange) onOptionsChange();
       setIsEditingContext(false);
     } catch (err) { console.error('Context save error:', err); }
-  }, [editingContext, contextVersions, detail]);
+  }, [editingContext, detail, onOptionsChange]);
 
   // ─── Styles ─────────────────────────────────────────────
   const isModal = mode === 'modal';
@@ -446,7 +465,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             {isEditingContext ? (
               <div>
                 <textarea value={editingContext} onChange={e => setEditingContext(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); handleSaveContext(); } }}
+                  onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); handleSaveContext(); } if (e.key === 'Escape') { setIsEditingContext(false); } }}
                   style={{
                   width: '100%', minHeight: '80px', padding: '8px',
                   border: '1px solid #1890ff', borderRadius: '4px',
@@ -465,11 +484,9 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 </div>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
                   <button onClick={() => { setEditingContext(sections.context || ''); setIsEditingContext(true); }} style={btnLink}>✏️ Редактировать</button>
-                  {contextVersions.length > 0 && (
-                    <button onClick={() => setShowContextHistory(!showContextHistory)} style={btnLink}>📜 Версии ({contextVersions.length})</button>
-                  )}
+                  <button onClick={() => { if (!showHistory) loadHistory(); setShowHistory(!showHistory); }} style={btnLink}>📜 История</button>
                 </div>
-                {(suggestingSection === 'context' || (suggestingSection === null && suggestedContent)) && (
+                {(suggestingSection === 'context' || (suggestingSection === null && suggestedContent && suggestedSectionName === 'context')) && (
                   <div style={{ marginTop: '8px', padding: '10px', background: '#f0f5ff', borderRadius: '4px', border: '1px solid #adc6ff' }}>
                     {suggestingSection === 'context' ? (
                       <div style={{ textAlign: 'center', color: '#2f54eb', fontSize: '12px' }}>
@@ -481,7 +498,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                           <span style={{ fontSize: '11px', fontWeight: 700, color: '#2f54eb' }}>🪄 AI дополнение:</span>
                           <div style={{ display: 'flex', gap: '4px' }}>
                             <button onClick={() => handleApplySuggestion('context')} style={{ border: '1px solid #52c41a', background: '#f6ffed', color: '#389e0d', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}>+ Добавить</button>
-                            <button onClick={() => setSuggestedContent('')} style={{ border: '1px solid #d0d0d0', background: '#fff', color: '#666', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}>Отклонить</button>
+                            <button onClick={() => { setSuggestedContent(''); setSuggestedSectionName(null); }} style={{ border: '1px solid #d0d0d0', background: '#fff', color: '#666', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}>Отклонить</button>
                           </div>
                         </div>
                         <div style={{ fontSize: '12px', color: '#333', lineHeight: 1.5 }}>
@@ -494,12 +511,29 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                     )}
                   </div>
                 )}
-                {showContextHistory && contextVersions.map((v, i) => (
-                  <div key={i} style={{ marginTop: '6px', padding: '8px', background: '#f5f5f5', borderRadius: '4px', fontSize: '12px', borderLeft: '3px solid #1890ff' }}>
-                    <div style={{ color: '#999', marginBottom: '4px' }}>Версия {contextVersions.length - i}</div>
-                    {v}
+                {showHistory && (
+                  <div style={{ marginTop: '8px' }}>
+                    {loadingHistory && <div style={{ fontSize: '11px', color: '#999' }}>Загрузка...</div>}
+                    {!loadingHistory && history.length === 0 && <div style={{ fontSize: '11px', color: '#999' }}>Нет истории изменений</div>}
+                    {history.map((entry, i) => (
+                      <div key={i} style={{ marginTop: '6px', padding: '8px', background: '#f5f5f5', borderRadius: '4px', fontSize: '12px', borderLeft: '3px solid #1890ff' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ color: '#1890ff', fontWeight: 'bold' }}>{entry.hash}</span>
+                          <span style={{ color: '#999', fontSize: '10px' }}>{entry.date}</span>
+                        </div>
+                        <div style={{ color: '#666', marginBottom: '4px' }}>{entry.message}</div>
+                        {entry.changes.length > 0 && (
+                          <details style={{ marginTop: '4px' }}>
+                            <summary style={{ fontSize: '10px', color: '#999', cursor: 'pointer' }}>Изменения ({entry.changes.length})</summary>
+                            <pre style={{ fontSize: '10px', color: '#333', whiteSpace: 'pre-wrap', marginTop: '4px', maxHeight: '200px', overflow: 'auto' }}>
+                              {entry.changes.filter(l => l.startsWith('+') || l.startsWith('-')).join('\n')}
+                            </pre>
+                          </details>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             )}
           </Section>
@@ -528,8 +562,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                       onClick={() => setSelectedOption(isSel ? null : opt.letter)}
                       onDoubleClick={(e) => {
                         e.stopPropagation();
-                        const isCustom = customOptions.some(co => co.letter === opt.letter);
-                        if (isCustom) { setEditingOptionLetter(opt.letter); setEditingOptionTitle(opt.title); }
+                        setEditingOptionLetter(opt.letter); setEditingOptionTitle(opt.title);
                       }}
                       title="Двойной клик — редактировать"
                       style={{
@@ -556,9 +589,9 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                     {isVoted && <span style={{ fontSize: '14px' }}>✅</span>}
                     <button
                       onClick={(e) => { e.stopPropagation(); if (confirm(`Удалить вариант ${opt.letter}?`)) {
-                        // Delete custom option via API
-                        fetch(`/api/options/${detail.id}/${opt.letter}`, { method: 'DELETE', headers: { 'X-Project-Id': String(1) } })
-                          .then(() => onCustomOptionsChange(customOptions.filter(o => o.letter !== opt.letter)))
+                        // Delete option via API (now writes to MD)
+                        authFetch(`/api/options/${detail.id}/${opt.letter}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json', 'X-Project-Id': localStorage.getItem('archtrace-pid') || '1' } })
+                          .then(() => onOptionsChange?.())
                           .catch(err => console.error('Delete option:', err));
                       } }}
                       title="Удалить вариант"
@@ -571,7 +604,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               })}
             </div>
 
-            {showAddOption ? (
+            {showAddOption && (
               <div style={{ marginBottom: '8px', padding: '8px', background: '#f5f5f5', borderRadius: '4px' }}>
                 <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
                   <input type="text" placeholder="Название варианта..." value={newOptionTitle} onChange={e => setNewOptionTitle(e.target.value)} style={{ flex: 1, padding: '4px', border: '1px solid #d0d0d0', borderRadius: '3px', fontSize: '13px' }} autoFocus />
@@ -581,10 +614,11 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                   <button onClick={() => setShowAddOption(false)} style={btnSecondary}>Отмена</button>
                 </div>
               </div>
-            ) : (
-              <>
-                <button onClick={() => setShowAddOption(true)} style={{ ...btnLink, marginBottom: '8px' }}>+ Добавить вариант</button>
-            {(suggestingSection === 'options' || (suggestingSection === null && suggestedContent)) && (
+            )}
+            {!showAddOption && (
+              <button onClick={() => setShowAddOption(true)} style={{ ...btnLink, marginBottom: '8px' }}>+ Добавить вариант</button>
+            )}
+            {(suggestingSection === 'options' || (suggestingSection === null && suggestedContent && suggestedSectionName === 'options')) && (
               <div style={{ marginTop: '8px', padding: '10px', background: '#f0f5ff', borderRadius: '4px', border: '1px solid #adc6ff' }}>
                 {suggestingSection === 'options' ? (
                   <div style={{ textAlign: 'center', color: '#2f54eb', fontSize: '12px' }}>
@@ -594,13 +628,15 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                       <span style={{ fontSize: '11px', fontWeight: 700, color: '#2f54eb' }}>🪄 AI-варианты:</span>
-                      <button onClick={() => setSuggestedContent('')} style={{ border: '1px solid #d0d0d0', background: '#fff', color: '#666', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}>Отклонить</button>
+                      <button onClick={() => { setSuggestedContent(''); setSuggestedSectionName(null); }} style={{ border: '1px solid #d0d0d0', background: '#fff', color: '#666', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}>Отклонить</button>
                     </div>
                     {(() => {
                       const lines = suggestedContent.split('\n').map((l: string) => l.trim()).filter((l: string) => l.match(/^[-*]/)).map((l: string) => l.replace(/^[-*]\s+/, '').trim()).filter((l: string) => l.length > 2);
+                      // Track which AI suggestions have been added
+                      const addedTitles = new Set(allOptions.map(o => o.title));
                       return (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          {lines.map((title: string, i: number) => (
+                          {lines.filter(title => !addedTitles.has(title)).map((title: string, i: number) => (
                             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <span style={{ flex: 1, fontSize: '12px', color: '#333' }}>{title}</span>
                               <button onClick={async () => {
@@ -609,14 +645,28 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                                 for (let j = 65; j <= 90; j++) { const l = String.fromCharCode(j); if (!usedLetters.has(l)) { nextLetter = l; break; } }
                                 if (!nextLetter) nextLetter = String.fromCharCode(65 + allOptions.length);
                                 try {
-                                  const opt = await addCustomOptionApi(detail.id, nextLetter, title);
-                                  onCustomOptionsChange([...customOptions, opt]);
+                                  await addCustomOptionApi(detail.id, nextLetter, title);
+                                  onOptionsChange?.();
+                                  setSuggestedContent(prev => {
+                                    const remaining = prev.split('\n').filter(l => {
+                                      const clean = l.trim().replace(/^[-*]\s+/, '').trim();
+                                      return clean !== title;
+                                    });
+                                    if (remaining.filter(l => l.trim().match(/^[-*]/)).length === 0) {
+                                      setSuggestedSectionName(null);
+                                      return '';
+                                    }
+                                    return remaining.join('\n');
+                                  });
                                 } catch (err) { console.error('Add AI option:', err); }
                               }} style={{ border: '1px solid #52c41a', background: '#f6ffed', color: '#389e0d', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                                 + Добавить
                               </button>
                             </div>
                           ))}
+                          {lines.filter(title => !addedTitles.has(title)).length === 0 && lines.length > 0 && (
+                            <div style={{ fontSize: '11px', color: '#999', padding: '4px' }}>Все варианты добавлены ✅</div>
+                          )}
                         </div>
                       );
                     })()}
@@ -626,8 +676,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                   <div style={{ color: '#ff4d4f', fontSize: '11px', marginTop: '4px' }}>{suggestError}</div>
                 )}
               </div>
-            )}
-            </>
             )}
 
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -703,9 +751,14 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 }}>
                   <ReactMarkdown>{aiAnalysis}</ReactMarkdown>
                 </div>
-                <button onClick={handleAnalyze} style={{
-                  ...btnLink, marginTop: '6px', color: '#fa541c',
-                }}>🔄 Обновить анализ</button>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                  <button onClick={handleAnalyze} style={{
+                    ...btnLink, color: '#fa541c',
+                  }}>🔄 Обновить анализ</button>
+                  <button onClick={() => setAiAnalysis(null)} style={{
+                    ...btnLink, color: '#999',
+                  }}>✕ Закрыть</button>
+                </div>
                 {aiAlternatives.length > 0 && (
                   <div style={{ marginTop: '10px', padding: '8px', background: '#f0f5ff', borderRadius: '4px', border: '1px solid #adc6ff' }}>
                     <div style={{ fontSize: '11px', fontWeight: 700, color: '#2f54eb', marginBottom: '6px' }}>
@@ -723,8 +776,8 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                           }
                           if (!nextLetter) nextLetter = String.fromCharCode(65 + allOptions.length);
                           try {
-                            const opt = await addCustomOptionApi(detail.id, nextLetter, alt);
-                            onCustomOptionsChange([...customOptions, opt]);
+                            await addCustomOptionApi(detail.id, nextLetter, alt);
+                            onOptionsChange?.();
                             // Remove from alternatives list
                             setAiAlternatives(prev => prev.filter((_, idx) => idx !== i));
                           } catch (err) { console.error('Add alt as option:', err); }
@@ -860,7 +913,8 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               <input
                 type="text" placeholder="Написать комментарий..."
                 value={commentText} onChange={e => setCommentText(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handlePostComment(); }}
+                onKeyDown={e => { if (e.key === 'Enter') handlePostComment();
+                  if (e.key === 'Escape') { setEditingCommentId(null); setEditingCommentText(''); } }}
                 style={{ flex: 1, padding: '6px 10px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px' }}
               />
               <button onClick={handlePostComment} disabled={!commentText.trim()} style={{

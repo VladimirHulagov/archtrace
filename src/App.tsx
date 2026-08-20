@@ -4,13 +4,17 @@ import {
   fetchGraph, syncRepo, fetchProjects, setProjectId,
   fetchComments, postComment, deleteCommentApi,
   fetchVotes, castVoteApi, removeVoteApi,
-  fetchCustomOptions, addCustomOptionApi,
+
   type Graph, type DecisionNode, type SyncResult,
-  type Comment, type Vote, type CustomOption, type Project,
+  type Comment, type Vote, type Project,
   createDecision, updateDecision,
 } from './api';
 import { calculateLayout } from './SimpleTree/utils/positions';
-import { fetchGitInfo, revertGit, createProjectApi, saveGithubToken, checkGithubToken, deleteGithubToken } from './api';
+import {
+  fetchGitInfo, revertGit, createProjectApi,
+  loginWithPat, fetchMe, logout,
+  type AuthUser,
+} from './api';
 import type { Point } from './SimpleTree/types';
 import ReactMarkdown from 'react-markdown';
 import { DetailPanel } from './DetailPanel';
@@ -38,7 +42,7 @@ function decisionToTreeNode(d: DecisionNode): TreeNode {
   return {
     id: d.id, x: 0, y: 0, text: d.title, type: 'rich', status: d.status,
     icon: STATUS_ICONS[d.status] || TYPE_ICONS[d.type] || '📄',
-    description: d.type, nodeType: d.type, voteTally, voteSectors, winnerVote, options: d.options || [],
+    description: d.type, nodeType: d.type, voteTally, voteSectors, winnerVote, options: [...(d.options || [])].sort((a, b) => a.letter.localeCompare(b.letter)),
     phase: d.phase || (d.type === 'problem' ? 1 : d.type === 'requirement' ? 2 : d.type === 'paradigm' ? 3 : 4),
   };
 }
@@ -56,28 +60,27 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [showProjectMenu, setShowProjectMenu] = useState(false);
-  const [currentUser, setCurrentUser] = useState<{ id: number; username: string; role: string } | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [gitInfo, setGitInfo] = useState<{ commitHash: string | null; repoUrl: string | null; prevHash: string | null }>({ commitHash: null, repoUrl: null, prevHash: null });
   const [reverting, setReverting] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [detailAsModal, setDetailAsModal] = useState(false);
-  const [showPatModal, setShowPatModal] = useState(false);
-  const [hasGithubToken, setHasGithubToken] = useState(false);
+  // PAT modal superseded by login modal
   const [gitSyncStatus, setGitSyncStatus] = useState<'synced' | 'pending' | 'error' | 'none'>('none');
   const [pendingNewNode, setPendingNewNode] = useState<TreeNode | null>(null);
   const [showRepoSetup, setShowRepoSetup] = useState(false);
   const [repoSetupProject, setRepoSetupProject] = useState<Project | null>(null);
   const [repoUrl, setRepoUrl] = useState('');
   const [repoFolder, setRepoFolder] = useState('');
-  const [users, setUsers] = useState<{ id: number; username: string; role: string }[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<SyncResult | null>(null);
   const [showSyncBanner, setShowSyncBanner] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [votes, setVotes] = useState<Vote[]>([]);
-  const [customOptions, setCustomOptions] = useState<CustomOption[]>([]);
+
   const [commentText, setCommentText] = useState('');
   const [newOptionLetter, setNewOptionLetter] = useState('');
   const [newOptionTitle, setNewOptionTitle] = useState('');
@@ -146,8 +149,8 @@ function App() {
           phase: updatedNode.phase || 1,
           context: updatedNode.description || undefined,
         });
-        // Replace local node with real one
-        setNodes(prev => prev.map(n => n.id === updatedNode.id ? { ...updatedNode, id: result.id } : n));
+        // Remove the temp local node, then reload graph from server
+        setNodes(prev => prev.filter(n => n.id !== updatedNode.id));
         setPendingNewNode(null);
         // Reload graph to get proper layout
         reloadGraph();
@@ -166,6 +169,7 @@ function App() {
   const handleProjectSwitch = useCallback(async (project: Project) => {
     setCurrentProject(project);
     setProjectId(project.id);
+    try { localStorage.setItem('archtrace-pid', String(project.id)); } catch {}
     setShowProjectMenu(false);
     setSelectedDetail(null);
 
@@ -208,9 +212,10 @@ function App() {
     const parentNode = parentId ? nodes.find(n => n.id === parentId) : null;
     const newId = `new-${nodeIdCounter.current++}`;
     const newNode: TreeNode = {
-      id: newId, x: parentNode ? parentNode.x + 50 : 400, y: parentNode ? parentNode.y + 150 : 50 + nodes.length * 80,
-      text: 'New Decision', type: 'rich', status: 'proposed', icon: '💡', description: 'decision',
+      id: newId, x: parentNode ? parentNode.x + 50 : Math.floor(window.innerWidth / 2) - 100, y: parentNode ? parentNode.y + 150 : 50 + nodes.length * 80,
+      text: '', type: 'rich', status: 'proposed', icon: '💡', description: '', nodeType: 'decision', phase: 4,
     };
+    setPendingNewNode(newNode);
     setNodes(prev => [...prev, newNode]);
     if (parentId) {
       const connId = `c${connectionIdCounter.current++}`;
@@ -272,11 +277,19 @@ function App() {
   const handleAddOption = useCallback(async () => {
     if (!selectedDetail || !newOptionLetter.trim() || !newOptionTitle.trim()) return;
     try {
-      const opt = await addCustomOptionApi(selectedDetail.id, newOptionLetter.trim().toUpperCase(), newOptionTitle.trim());
-      setCustomOptions(prev => [...prev, opt]);
+      // Use fetch directly — options now go to MD file
+      await fetch(`/api/options/${selectedDetail.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Project-Id': String(currentProject?.id || 1) },
+        body: JSON.stringify({ letter: newOptionLetter.trim().toUpperCase(), title: newOptionTitle.trim() }),
+      });
+      // Refetch detail to get updated options from MD
+      fetch(`/api/decisions/${selectedDetail.id}?projectId=${currentProject?.id || 1}`)
+        .then(r => r.json()).then(data => { if (data && data.id) setSelectedDetail(data); })
+        .catch(() => {});
       setNewOptionLetter(''); setNewOptionTitle(''); setShowAddOption(false);
     } catch (err) { console.error('Failed to add option:', err); }
-  }, [selectedDetail, newOptionLetter, newOptionTitle]);
+  }, [selectedDetail, newOptionLetter, newOptionTitle, currentProject]);
 
   // Sync URL hash on state changes
   useEffect(() => {
@@ -305,13 +318,14 @@ function App() {
   }, [selectedDetail]);
 
   const handleNodeClick = useCallback((node: TreeNode) => {
-    setDetailAsModal(false);
+    // Don't try to fetch detail for unsaved local nodes (new-XXX)
+    if (node.id.startsWith('new-')) return;
+    setDetailAsModal(window.innerWidth < 768);
     fetch(`/api/decisions/${node.id}?projectId=${currentProject?.id || 1}`).then(r => r.json()).then(data => {
       setSelectedDetail(data);
-      setComments([]); setVotes([]); setCustomOptions([]);
+      setComments([]); setVotes([]);
       fetchComments(node.id).then(setComments).catch(() => {});
       fetchVotes(node.id).then(setVotes).catch(() => {});
-      fetchCustomOptions(node.id).then(setCustomOptions).catch(() => {});
     }).catch(() => setSelectedDetail(null));
   }, [currentProject]);
 
@@ -323,12 +337,21 @@ function App() {
     const initialPid = parseInt(params.get('project') || '1', 10);
     const initialNode = params.get('node');
 
+    // Set project ID immediately so API calls (analysis, comments) use correct project
+    setProjectId(initialPid);
+    try { localStorage.setItem('archtrace-pid', String(initialPid)); } catch {}
+
     fetchProjects().then(ps => {
       setProjects(ps);
       const proj = ps.find(p => p.id === initialPid);
       if (proj) { setCurrentProject(proj); setProjectId(proj.id); }
     }).catch(() => {});
-    fetch('/api/users').then(r => r.json()).then(setUsers).catch(() => {});
+    // Auth: restore session, listen for 401 (write while guest) and logout events
+    fetchMe().then(u => setCurrentUser(u)).catch(() => {});
+    const onAuthRequired = () => setShowLoginModal(true);
+    const onAuthChanged = () => { fetchMe().then(u => setCurrentUser(u)).catch(() => setCurrentUser(null)); };
+    window.addEventListener('archtrace-auth-required', onAuthRequired);
+    window.addEventListener('archtrace-auth-changed', onAuthChanged);
 
     fetchGraph(initialPid).then((graph: Graph) => {
       const treeNodes = graph.nodes.map(decisionToTreeNode);
@@ -345,7 +368,6 @@ function App() {
               setSelectedDetail(data);
               fetchComments(initialNode).then(setComments).catch(() => {});
               fetchVotes(initialNode).then(setVotes).catch(() => {});
-              fetchCustomOptions(initialNode).then(setCustomOptions).catch(() => {});
             }
           }).catch(() => {});
       }
@@ -354,16 +376,13 @@ function App() {
 
   // ─── Early returns (AFTER all hooks) ───────────────────
 
-  if (loading) return (<div style={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><h2>Loading...</h2></div>);
-  if (error) return (<div style={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '12px' }}><h2 style={{ color: '#ff4d4f' }}>Failed to load</h2><p>{error}</p></div>);
+  if (loading) return (<div style={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><h2>Загрузка...</h2></div>);
+  if (error) return (<div style={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '12px' }}><h2 style={{ color: '#ff4d4f' }}>Ошибка загрузки</h2><p>{error}</p></div>);
 
   // ─── Render ────────────────────────────────────────────
 
   // Compute vote data for detail panel
-  const allOptions = selectedDetail ? [
-    ...(selectedDetail.options || []),
-    ...customOptions.map(o => ({ letter: o.letter, title: o.title })),
-  ] : [];
+  const allOptions = selectedDetail ? (selectedDetail.options || []) : [];
   const userVote = votes.find(v => v.user_id === 1);
   const voteTally: Record<string, number> = {};
   for (const v of votes) { voteTally[v.option_letter] = (voteTally[v.option_letter] || 0) + v.weight; }
@@ -454,7 +473,7 @@ function App() {
       )}
 
       {/* Project selector — top-left */}
-      <div style={{ position: 'fixed', top: '12px', left: '16px', zIndex: 1001 }}>
+      <div style={{ position: 'fixed', top: '12px', left: '16px', zIndex: 500 }}>
         <button
           onClick={() => setShowProjectMenu(!showProjectMenu)}
           style={{
@@ -494,10 +513,10 @@ function App() {
         )}
       </div>
 
-      {/* User selector — left, below project selector */}
-      <div style={{ position: 'fixed', top: '48px', left: '16px', zIndex: 1000 }}>
+      {/* User / Auth — left, below project selector */}
+      <div style={{ position: 'fixed', top: '48px', left: '16px', zIndex: 500 }}>
         <button
-          onClick={() => setShowUserMenu(!showUserMenu)}
+          onClick={() => currentUser ? setShowUserMenu(!showUserMenu) : setShowLoginModal(true)}
           style={{
             border: '1px solid #d0d0d0', background: '#fff', borderRadius: '4px',
             padding: '6px 14px', cursor: 'pointer', fontSize: '13px', color: '#333',
@@ -505,38 +524,26 @@ function App() {
             boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
           }}
         >
-          👤 {currentUser ? currentUser.username : 'Гость'} ▾
+          {currentUser ? `👤 ${currentUser.username} ▾` : '👤 Гость (войти)'}
         </button>
-        {showUserMenu && (
+        {showUserMenu && currentUser && (
           <div style={{
             position: 'absolute', top: '100%', left: 0, marginTop: '4px',
             background: '#fff', border: '1px solid #e0e0e0', borderRadius: '4px',
             boxShadow: '0 4px 12px rgba(0,0,0,0.1)', minWidth: '200px', overflow: 'hidden',
           }}>
-            {users.map(u => (
-              <div key={u.id} onClick={() => {
-                setCurrentUser(u);
-                checkGithubToken(u.id).then(r => setHasGithubToken(r.hasToken)).catch(() => {});
-                setShowUserMenu(false);
-              }} style={{
-                padding: '8px 14px', cursor: 'pointer',
-                borderBottom: '1px solid #f0f0f0',
-                background: currentUser?.id === u.id ? '#e6f7ff' : '#fff',
-                fontSize: '12px',
-              }}>
-                <span style={{ fontWeight: 'bold' }}>{u.username}</span>
-                <span style={{ marginLeft: '8px', fontSize: '10px', color: '#999' }}>
-                  {u.role === 'architect' ? '🏗 (×3)' : u.role === 'senior' ? '⚙️ (×2)' : '👤 (×1)'}
-                </span>
-              </div>
-            ))}
-            <div onClick={() => { setShowPatModal(true); setShowUserMenu(false); }} style={{
+            <div style={{ padding: '8px 14px', fontSize: '11px', color: '#999', borderBottom: '1px solid #f0f0f0' }}>
+              Роль: {currentUser.role === 'architect' ? '🏗 architect (голос ×3)' : currentUser.role === 'senior' ? '⚙️ senior (голос ×2)' : '👤 developer (голос ×1)'}
+            </div>
+            <div onClick={() => {
+              setShowUserMenu(false);
+              logout().then(() => setCurrentUser(null)).catch(() => {});
+            }} style={{
               padding: '8px 14px', cursor: 'pointer',
-              background: '#f6ffed', fontSize: '13px', color: '#389e0d',
-              fontWeight: 'bold', borderTop: '1px solid #d9f7be',
-              display: 'flex', alignItems: 'center', gap: '6px',
+              background: '#fff1f0', fontSize: '13px', color: '#ff4d4f',
+              fontWeight: 'bold',
             }}>
-              🔑 GitHub токен {hasGithubToken ? '✅' : '⬚'}
+              🚪 Выйти
             </div>
           </div>
         )}
@@ -566,12 +573,24 @@ function App() {
           initialMode={detailAsModal ? 'modal' : 'sidebar'}
           comments={comments}
           votes={votes}
-          customOptions={customOptions}
-          currentUserId={currentUser?.id || 1}
+          currentUserId={currentUser?.id ?? null}
           currentRole={currentUser?.role || 'developer'}
           onCommentsChange={setComments}
           onVotesChange={setVotes}
-          onCustomOptionsChange={setCustomOptions}
+          onOptionsChange={() => {
+            // Refetch detail to get updated options from MD
+            if (selectedDetail) {
+              fetch(`/api/decisions/${selectedDetail.id}?projectId=${currentProject?.id || 1}`)
+                .then(r => r.json())
+                .then(data => { if (data && data.id) setSelectedDetail(data); })
+                .catch(() => {});
+            }
+          }}
+          onTitleChange={(newTitle) => {
+            setSelectedDetail(prev => prev ? { ...prev, title: newTitle } : prev);
+            setNodes(prev => prev.map(n => n.id === selectedDetail.id ? { ...n, text: newTitle } : n));
+          }}
+          onBodyChange={(newBody) => setSelectedDetail(prev => prev ? { ...prev, body: newBody } : prev)}
           onClose={() => setSelectedDetail(null)}
           onDeleteNode={() => {
             if (selectedDetail) handleDeleteNode(selectedDetail.id);
@@ -670,15 +689,11 @@ function App() {
 
 
 
-      {/* PAT Modal */}
-      {showPatModal && (
-        <PatModal
-          userId={currentUser?.id || 1}
-          username={currentUser?.username || 'Гость'}
-          hasToken={hasGithubToken}
-          onClose={() => setShowPatModal(false)}
-          onSaved={() => { setHasGithubToken(true); setShowPatModal(false); }}
-          onDeleted={() => { setHasGithubToken(false); }}
+      {/* Login Modal (GitHub PAT) */}
+      {showLoginModal && (
+        <LoginModal
+          onClose={() => setShowLoginModal(false)}
+          onLoggedIn={(u) => { setCurrentUser(u); setShowLoginModal(false); }}
         />
       )}
 
@@ -698,42 +713,26 @@ function App() {
   );
 }
 
-// ─── PatModal ────────────────────────────────────────────
+// ─── LoginModal (GitHub PAT) ─────────────────────────────
 
-function PatModal({ userId, username, hasToken, onClose, onSaved, onDeleted }: {
-  userId: number;
-  username: string;
-  hasToken: boolean;
+function LoginModal({ onClose, onLoggedIn }: {
   onClose: () => void;
-  onSaved: () => void;
-  onDeleted: () => void;
+  onLoggedIn: (user: AuthUser) => void;
 }) {
-  const [token, setToken] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [pat, setPat] = useState('');
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [ghUser, setGhUser] = useState('');
 
-  const handleSave = async () => {
-    if (!token.trim()) { setError('Введите токен'); return; }
-    setSaving(true); setError('');
+  const handleLogin = async () => {
+    if (!pat.trim()) { setError('Введите токен'); return; }
+    setBusy(true); setError('');
     try {
-      const result = await saveGithubToken(userId, token.trim());
-      setGhUser(result.username || '');
-      onSaved();
+      const { user } = await loginWithPat(pat.trim());
+      onLoggedIn(user);
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Не удалось войти');
     } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    try {
-      await deleteGithubToken(userId);
-      onDeleted();
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
+      setBusy(false);
     }
   };
 
@@ -747,50 +746,45 @@ function PatModal({ userId, username, hasToken, onClose, onSaved, onDeleted }: {
         width: '480px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
       }}>
         <h2 style={{ margin: '0 0 16px 0', fontSize: '18px' }}>
-          🔑 GitHub Personal Access Token
+          🔑 Вход через GitHub
         </h2>
 
         <div style={{ fontSize: '13px', color: '#666', marginBottom: '16px', lineHeight: 1.5 }}>
-          <p style={{ margin: '0 0 8px 0' }}><b>Пользователь:</b> {username}</p>
           <p style={{ margin: '0 0 8px 0' }}>
             Создайте токен на{' '}
             <a href="https://github.com/settings/tokens/new?scopes=repo" target="_blank" rel="noopener noreferrer" style={{ color: '#1890ff' }}>
               github.com/settings/tokens
             </a>
-            {' '}со scope <code>repo</code> (полный доступ к репозиториям).
+            {' '}со scope <code>repo</code>.
           </p>
-          <p style={{ margin: 0 }}>Токен используется для создания репозиториев и синхронизации ADR.</p>
+          <p style={{ margin: 0 }}>
+            Токен подтверждает вашу личность (вес голоса по роли) и используется для
+            синхронизации ADR-файлов в GitHub. Гость может только читать.
+          </p>
         </div>
 
         <div style={{ marginBottom: '12px' }}>
           <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Personal Access Token</label>
           <input
             type="password"
-            value={token}
-            onChange={e => setToken(e.target.value)}
-            placeholder="ghp_..."
+            value={pat}
+            onChange={e => setPat(e.target.value)}
+            placeholder="ghp_... или github_pat_..."
             style={{ width: '100%', padding: '8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '14px', fontFamily: 'monospace', boxSizing: 'border-box' }}
             autoFocus
-            onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) handleSave(); }}
+            onKeyDown={e => { if (e.key === 'Enter') handleLogin(); }}
           />
         </div>
-
-        {hasToken && (
-          <div style={{ marginBottom: '12px', padding: '8px', background: '#f6ffed', borderRadius: '4px', border: '1px solid #b7eb8f', fontSize: '12px', color: '#389e0d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>✅ Токен сохранён{ghUser ? ` (${ghUser})` : ''}</span>
-            <button onClick={handleDelete} style={{ border: '1px solid #ffccc7', background: '#fff2f0', color: '#ff4d4f', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}>Удалить</button>
-          </div>
-        )}
 
         {error && <div style={{ color: '#ff4d4f', fontSize: '12px', marginBottom: '8px' }}>{error}</div>}
 
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
           <button onClick={onClose} style={{ padding: '8px 16px', border: '1px solid #d0d0d0', background: '#f0f0f0', borderRadius: '4px', cursor: 'pointer', fontSize: '13px' }}>Закрыть</button>
-          <button onClick={handleSave} disabled={saving || !token.trim()} style={{
-            padding: '8px 16px', border: 'none', borderRadius: '4px', cursor: saving ? 'wait' : 'pointer',
-            background: saving ? '#91d5ff' : '#1890ff', color: '#fff', fontSize: '13px', fontWeight: 'bold',
+          <button onClick={handleLogin} disabled={busy || !pat.trim()} style={{
+            padding: '8px 16px', border: 'none', borderRadius: '4px', cursor: busy ? 'wait' : 'pointer',
+            background: busy ? '#91d5ff' : '#1890ff', color: '#fff', fontSize: '13px', fontWeight: 'bold',
           }}>
-            {saving ? 'Проверка...' : 'Сохранить (Ctrl+Enter)'}
+            {busy ? 'Проверка...' : 'Войти (Enter)'}
           </button>
         </div>
       </div>

@@ -1,3 +1,61 @@
+// ─── Auth (GitHub PAT session) ───────────────────────────
+
+export interface AuthUser {
+  id: number;
+  username: string;
+  role: string;
+  avatarUrl?: string | null;
+}
+
+const SESSION_KEY = 'archtrace-session';
+
+export function getSessionToken(): string | null {
+  try { return localStorage.getItem(SESSION_KEY); } catch { return null; }
+}
+
+export function setSessionToken(token: string | null) {
+  try {
+    if (token) localStorage.setItem(SESSION_KEY, token);
+    else localStorage.removeItem(SESSION_KEY);
+  } catch {}
+}
+
+export function authHeaders(): Record<string, string> {
+  const t = getSessionToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
+export async function loginWithPat(pat: string): Promise<{ token: string; user: AuthUser }> {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pat }),
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { const j = await res.json(); if (j.error) msg = j.error; } catch {}
+    throw new Error(msg);
+  }
+  const data = await res.json();
+  setSessionToken(data.token);
+  window.dispatchEvent(new CustomEvent('archtrace-auth-changed'));
+  return data;
+}
+
+export async function fetchMe(): Promise<AuthUser | null> {
+  const res = await fetch('/api/auth/me', { headers: authHeaders() });
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (!data.user) { setSessionToken(null); return null; }
+  return data.user;
+}
+
+export async function logout(): Promise<void> {
+  try { await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }); } catch {}
+  setSessionToken(null);
+  window.dispatchEvent(new CustomEvent('archtrace-auth-changed'));
+}
+
 export interface DecisionNode {
   id: string;
   title: string;
@@ -81,15 +139,6 @@ export interface Vote {
   updated_at: string;
 }
 
-export interface CustomOption {
-  id: number;
-  node_id: string;
-  letter: string;
-  title: string;
-  created_by: number | null;
-  created_at: string;
-}
-
 // ─── DB API Functions ────────────────────────────────────
 
 export async function fetchComments(nodeId: string): Promise<Comment[]> {
@@ -99,21 +148,21 @@ export async function fetchComments(nodeId: string): Promise<Comment[]> {
 }
 
 export async function postComment(nodeId: string, content: string, parentCommentId?: number, userId?: number): Promise<Comment> {
-  const res = await fetch(`${API_BASE}/comments/${nodeId}`, {
+  const res = await authFetch(`${API_BASE}/comments/${nodeId}`, {
     method: 'POST',
     headers: jsonHeaders(),
-    body: JSON.stringify({ content, parentCommentId, userId }),
+    body: JSON.stringify({ content, parentCommentId }),
   });
   if (!res.ok) throw new Error('Failed to post comment');
   return res.json();
 }
 
 export async function deleteCommentApi(commentId: number): Promise<void> {
-  await fetch(`${API_BASE}/comments/${commentId}`, { method: 'DELETE', headers: projectHeaders() });
+  await authFetch(`${API_BASE}/comments/${commentId}`, { method: 'DELETE', headers: projectHeaders() });
 }
 
 export async function updateCommentApi(commentId: number, content: string): Promise<Comment> {
-  const res = await fetch(`${API_BASE}/comments/${commentId}`, {
+  const res = await authFetch(`${API_BASE}/comments/${commentId}`, {
     method: 'PUT',
     headers: jsonHeaders(),
     body: JSON.stringify({ content }),
@@ -123,17 +172,17 @@ export async function updateCommentApi(commentId: number, content: string): Prom
 }
 
 export async function reactToComment(commentId: number, reaction: 'like' | 'dislike', userId?: number): Promise<{ likes: number; dislikes: number; userReaction: string | null }> {
-  const res = await fetch(`${API_BASE}/comments/${commentId}/react`, {
+  const res = await authFetch(`${API_BASE}/comments/${commentId}/react`, {
     method: 'POST',
     headers: jsonHeaders(),
-    body: JSON.stringify({ reaction, userId }),
+    body: JSON.stringify({ reaction }),
   });
   if (!res.ok) throw new Error('Failed to react');
   return res.json();
 }
 
-export async function updateCustomOptionApi(nodeId: string, letter: string, title: string): Promise<CustomOption> {
-  const res = await fetch(`${API_BASE}/options/${nodeId}/${letter}`, {
+export async function updateCustomOptionApi(nodeId: string, letter: string, title: string): Promise<{ letter: string; title: string }> {
+  const res = await authFetch(`${API_BASE}/options/${nodeId}/${letter}?projectId=${_currentProjectId}`, {
     method: 'PUT',
     headers: jsonHeaders(),
     body: JSON.stringify({ title }),
@@ -149,28 +198,28 @@ export async function fetchVotes(nodeId: string): Promise<Vote[]> {
 }
 
 export async function castVoteApi(nodeId: string, optionLetter: string, weight: number, rationale?: string, userId?: number): Promise<Vote> {
-  const res = await fetch(`${API_BASE}/votes/${nodeId}`, {
+  const res = await authFetch(`${API_BASE}/votes/${nodeId}`, {
     method: 'POST',
     headers: jsonHeaders(),
-    body: JSON.stringify({ optionLetter, weight, rationale, userId }),
+    body: JSON.stringify({ optionLetter, rationale }),
   });
   if (!res.ok) throw new Error('Failed to cast vote');
   return res.json();
 }
 
 export async function removeVoteApi(nodeId: string, userId?: number): Promise<void> {
-  const url = userId ? `${API_BASE}/votes/${nodeId}?userId=${userId}` : `${API_BASE}/votes/${nodeId}`;
-  await fetch(url, { method: 'DELETE', headers: projectHeaders() });
+  await authFetch(`${API_BASE}/votes/${nodeId}`, { method: 'DELETE', headers: projectHeaders() });
 }
 
-export async function fetchCustomOptions(nodeId: string): Promise<CustomOption[]> {
+// Options now live in the MD file — fetch from same endpoint
+export async function fetchCustomOptions(nodeId: string): Promise<{ letter: string; title: string }[]> {
   const res = await fetch(`${API_BASE}/options/${nodeId}`, { headers: projectHeaders() });
   if (!res.ok) return [];
   return res.json();
 }
 
-export async function addCustomOptionApi(nodeId: string, letter: string, title: string): Promise<CustomOption> {
-  const res = await fetch(`${API_BASE}/options/${nodeId}`, {
+export async function addCustomOptionApi(nodeId: string, letter: string, title: string): Promise<{ letter: string; title: string }> {
+  const res = await authFetch(`${API_BASE}/options/${nodeId}?projectId=${_currentProjectId}`, {
     method: 'POST',
     headers: jsonHeaders(),
     body: JSON.stringify({ letter, title }),
@@ -202,7 +251,7 @@ export async function createProjectApi(data: {
   git_branch?: string;
   git_path?: string;
 }): Promise<Project> {
-  const res = await fetch(`${API_BASE}/projects`, {
+  const res = await authFetch(`${API_BASE}/projects`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -219,6 +268,18 @@ export function setProjectId(id: number) { _currentProjectId = id; }
 
 function projectHeaders(): Record<string, string> {
   return { 'X-Project-Id': String(_currentProjectId) };
+}
+
+/** fetch wrapper: adds auth + project headers; dispatches 401 event for the login modal. */
+export async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers || {});
+  const t = getSessionToken();
+  if (t) headers.set('Authorization', `Bearer ${t}`);
+  const res = await fetch(url, { ...init, headers });
+  if (res.status === 401) {
+    window.dispatchEvent(new CustomEvent('archtrace-auth-required'));
+  }
+  return res;
 }
 
 function jsonHeaders(): Record<string, string> {
@@ -242,7 +303,7 @@ export async function fetchDecision(id: string, projectId?: number): Promise<Dec
 }
 
 export async function syncRepo(): Promise<SyncResult> {
-  const res = await fetch(`${API_BASE}/sync`, { method: 'POST' });
+  const res = await authFetch(`${API_BASE}/sync`, { method: 'POST' });
   if (!res.ok) throw new Error(`Sync failed: ${res.statusText}`);
   return res.json();
 }
@@ -268,7 +329,7 @@ export interface AdrInput {
 }
 
 export async function createDecision(data: AdrInput): Promise<{ id: string; filename: string; message: string }> {
-  const res = await fetch(`${API_BASE}/decisions`, {
+  const res = await authFetch(`${API_BASE}/decisions`, {
     method: 'POST',
     headers: jsonHeaders(),
     body: JSON.stringify(data),
@@ -278,7 +339,7 @@ export async function createDecision(data: AdrInput): Promise<{ id: string; file
 }
 
 export async function updateDecision(id: string, data: Partial<AdrInput> & { status?: string }): Promise<{ id: string; message: string }> {
-  const res = await fetch(`${API_BASE}/decisions/${id}`, {
+  const res = await authFetch(`${API_BASE}/decisions/${id}`, {
     method: 'PUT',
     headers: jsonHeaders(),
     body: JSON.stringify(data),
@@ -303,7 +364,7 @@ export async function fetchGitInfo(): Promise<GitInfo> {
 }
 
 export async function revertGit(): Promise<{ success: boolean; message: string; commitHash: string }> {
-  const res = await fetch(`${API_BASE}/git-revert`, {
+  const res = await authFetch(`${API_BASE}/git-revert`, {
     method: 'POST',
     headers: jsonHeaders(),
   });
@@ -314,7 +375,7 @@ export async function revertGit(): Promise<{ success: boolean; message: string; 
 // ─── AI Analysis ──────────────────────────────────────────
 
 export async function suggestSection(nodeId: string, section: 'context' | 'options' | 'consequences'): Promise<{ content: string; alternatives?: string[] }> {
-  const res = await fetch(`${API_BASE}/decisions/${nodeId}/suggest`, {
+  const res = await authFetch(`${API_BASE}/decisions/${nodeId}/suggest`, {
     method: 'POST',
     headers: jsonHeaders(),
     body: JSON.stringify({ section }),
@@ -325,31 +386,11 @@ export async function suggestSection(nodeId: string, section: 'context' | 'optio
 
 // ─── GitHub PAT ───────────────────────────────────────────
 
-export async function saveGithubToken(userId: number, token: string): Promise<{ success: boolean; username?: string }> {
-  const res = await fetch(`${API_BASE}/users/${userId}/github-token`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token }),
-  });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Failed to save token');
-  }
-  return res.json();
-}
 
-export async function deleteGithubToken(userId: number): Promise<void> {
-  await fetch(`${API_BASE}/users/${userId}/github-token`, { method: 'DELETE' });
-}
 
-export async function checkGithubToken(userId: number): Promise<{ hasToken: boolean }> {
-  const res = await fetch(`${API_BASE}/users/${userId}/github-token`);
-  if (!res.ok) return { hasToken: false };
-  return res.json();
-}
 
 export async function startAnalysis(nodeId: string): Promise<{ status: string }> {
-  const res = await fetch(`${API_BASE}/decisions/${nodeId}/analyze`, {
+  const res = await authFetch(`${API_BASE}/decisions/${nodeId}/analyze?projectId=${_currentProjectId}`, {
     method: 'POST',
     headers: projectHeaders(),
   });
@@ -358,7 +399,22 @@ export async function startAnalysis(nodeId: string): Promise<{ status: string }>
 }
 
 export async function getAnalysisStatus(nodeId: string): Promise<{ analyzing: boolean; analysis: string | null; model?: string; created_at?: string }> {
-  const res = await fetch(`${API_BASE}/decisions/${nodeId}/analysis`, { headers: projectHeaders() });
+  const res = await fetch(`${API_BASE}/decisions/${nodeId}/analysis?projectId=${_currentProjectId}`, { headers: projectHeaders() });
   if (!res.ok) return { analyzing: false, analysis: null };
+  return res.json();
+}
+
+// ─── Decision History (git log) ──────────────────────────
+
+export interface HistoryEntry {
+  hash: string;
+  date: string;
+  message: string;
+  changes: string[];
+}
+
+export async function fetchHistory(nodeId: string): Promise<HistoryEntry[]> {
+  const res = await fetch(`${API_BASE}/decisions/${nodeId}/history`, { headers: projectHeaders() });
+  if (!res.ok) return [];
   return res.json();
 }

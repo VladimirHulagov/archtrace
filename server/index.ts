@@ -22,14 +22,16 @@ import {
   getComments, addComment, deleteComment, updateComment,
   getVotes, castVote, removeVote,
   toggleReaction,
-  updateCustomOption,
-  getCustomOptions, addCustomOption, deleteCustomOption,
   getOrCreateUser, getUserById, getProjects, createProject,
   updateUserGithubToken, getUserGithubToken,
+  createSession, getSessionUser, deleteSession,
   checkDb,
   query,
   saveAnalysis, getAnalysis,
 } from './db.js';
+import {
+  addOptionToMd, updateOptionInMd, removeOptionFromMd, findDecisionFile,
+} from './options-md.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const localDecisionsDir = path.resolve(__dirname, '..', 'decisions');
@@ -39,6 +41,84 @@ const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
+
+// ─── Auth (GitHub PAT) ────────────────────────────────────
+
+function extractSessionToken(req: express.Request): string | null {
+  const h = req.headers.authorization;
+  if (h && h.startsWith('Bearer ')) return h.slice(7);
+  return null;
+}
+
+/** Attach authUser if a valid session token is present. Read endpoints skip this silently. */
+app.use((req, _res, next) => {
+  const token = extractSessionToken(req);
+  if (!token) return next();
+  getSessionUser(token)
+    .then(user => { if (user) (req as any).authUser = { id: user.id, username: user.username, role: user.role }; next(); })
+    .catch(() => next());
+});
+
+/** Require a logged-in user for write operations. */
+function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const u = (req as any).authUser;
+  if (!u) return res.status(401).json({ error: 'Требуется вход по GitHub PAT' });
+  next();
+}
+
+/** Require architect role (admin) for destructive operations. */
+function requireArchitect(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const u = (req as any).authUser;
+  if (!u) return res.status(401).json({ error: 'Требуется вход по GitHub PAT' });
+  if (u.role !== 'architect') return res.status(403).json({ error: 'Требуется роль architect' });
+  next();
+}
+
+/**
+ * POST /api/auth/login  Body: { pat }
+ * Verify GitHub PAT, create user if needed, save PAT for git pushes, issue session.
+ */
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { pat } = req.body;
+    if (!pat || !pat.trim()) return res.status(400).json({ error: 'pat required' });
+    const check = await githubCheckTokenDetailed(pat.trim());
+    if (!check.valid) {
+      return res.status(401).json({ error: `Недействительный токен: ${check.error}` });
+    }
+    const user = await getOrCreateUser(check.githubId!, check.username!, check.name || null, check.avatarUrl || null);
+    // PAT doubles as the git-push token for this user
+    await updateUserGithubToken(user.id, pat.trim());
+    const session = await createSession(user.id);
+    res.json({
+      token: session.token,
+      user: { id: user.id, username: user.username, role: user.role, avatarUrl: user.avatar_url },
+      expiresAt: session.expiresAt,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/auth/me — current session user (null if guest).
+ */
+app.get('/api/auth/me', async (req, res) => {
+  const token = extractSessionToken(req);
+  if (!token) return res.json({ user: null });
+  const user = await getSessionUser(token);
+  if (!user) return res.json({ user: null });
+  res.json({ user: { id: user.id, username: user.username, role: user.role, avatarUrl: user.avatar_url } });
+});
+
+/**
+ * POST /api/auth/logout — invalidate session.
+ */
+app.post('/api/auth/logout', async (req, res) => {
+  const token = extractSessionToken(req);
+  if (token) await deleteSession(token);
+  res.status(204).end();
+});
 
 // Slugify Cyrillic to Latin (for repo names)
 function slugifyLatin(text: string): string {
@@ -71,7 +151,7 @@ const projectDirCache = new Map<number, string>();
  * Each project with a git_repo_url gets its own clone at git-data-<projectId>/.
  * Projects without git_repo_url get an empty temp dir.
  */
-async function projectDecisionsDir(projectId: number): Promise<string> {
+async function projectDecisionsDir(projectId: number, skipSync: boolean = false): Promise<string> {
   if (projectDirCache.has(projectId)) {
     return projectDirCache.get(projectId)!;
   }
@@ -149,7 +229,7 @@ app.get('/api/config', (_req, res) => {
   }
 });
 
-app.put('/api/config', (req, res) => {
+app.put('/api/config', requireArchitect, (req, res) => {
   try {
     const current = loadConfig();
     const incoming = req.body;
@@ -178,7 +258,7 @@ app.put('/api/config', (req, res) => {
 
 // ─── Sync Routes ─────────────────────────────────────────
 
-app.post('/api/sync', (_req, res) => {
+app.post('/api/sync', requireArchitect, (_req, res) => {
   try {
     const result = syncRepo();
     res.json(result);
@@ -249,6 +329,38 @@ async function githubCreateRepo(token: string, name: string, description: string
   });
 }
 
+async function githubCheckTokenDetailed(token: string): Promise<{ valid: boolean; username?: string; githubId?: number; name?: string | null; avatarUrl?: string | null; error?: string }> {
+  return new Promise((resolve) => {
+    const req = https.request({
+      hostname: 'api.github.com',
+      path: '/user',
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'ArchTrace',
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (res.statusCode === 200) {
+            resolve({ valid: true, username: json.login, githubId: json.id, name: json.name ?? null, avatarUrl: json.avatar_url ?? null });
+          } else {
+            resolve({ valid: false, error: json.message || `HTTP ${res.statusCode}` });
+          }
+        } catch {
+          resolve({ valid: false, error: 'Parse error' });
+        }
+      });
+    });
+    req.on('error', (err) => resolve({ valid: false, error: err.message }));
+    req.end();
+  });
+}
+
 async function githubCheckToken(token: string): Promise<{ valid: boolean; username?: string; error?: string }> {
   return new Promise((resolve) => {
     const req = https.request({
@@ -299,55 +411,7 @@ function authGitUrlWithToken(url: string, token: string | null): string {
   return url;
 }
 
-// ─── PAT Management Routes ────────────────────────────────
-
-/**
- * PUT /api/users/:id/github-token
- * Save or update GitHub PAT. Body: { token }
- */
-app.put('/api/users/:id/github-token', async (req, res) => {
-  try {
-    const userId = parseInt(req.params.id, 10);
-    const { token } = req.body;
-    if (!token || !token.trim()) return res.status(400).json({ error: 'token required' });
-
-    // Verify token
-    const check = await githubCheckToken(token.trim());
-    if (!check.valid) return res.status(400).json({ error: `Invalid token: ${check.error}` });
-
-    await updateUserGithubToken(userId, token.trim());
-    res.json({ success: true, username: check.username });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * DELETE /api/users/:id/github-token
- */
-app.delete('/api/users/:id/github-token', async (req, res) => {
-  try {
-    const userId = parseInt(req.params.id, 10);
-    await updateUserGithubToken(userId, null);
-    res.status(204).end();
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * GET /api/users/:id/github-token
- * Returns whether user has a token (NOT the token itself)
- */
-app.get('/api/users/:id/github-token', async (req, res) => {
-  try {
-    const userId = parseInt(req.params.id, 10);
-    const token = await getUserGithubToken(userId);
-    res.json({ hasToken: !!token });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// ─── PAT management routes removed — login via POST /api/auth/login supersedes them ───
 
 // ─── Git Info Routes ─────────────────────────────────────
 
@@ -403,7 +467,7 @@ app.get('/api/git-info', async (req, res) => {
  * POST /api/git-revert
  * Reverts to previous commit (git reset --hard HEAD~1) and pushes.
  */
-app.post('/api/git-revert', async (req, res) => {
+app.post('/api/git-revert', requireArchitect, async (req, res) => {
   try {
     const projectId = getProjectId(req);
     const { getProject } = await import('./db.js');
@@ -459,7 +523,7 @@ app.post('/api/git-revert', async (req, res) => {
 
 // ─── Section Suggestion (AI per-section) ──────────────────
 
-app.post('/api/decisions/:id/suggest', async (req, res) => {
+app.post('/api/decisions/:id/suggest', requireAuth, async (req, res) => {
   try {
     const { section } = req.body;
     if (!section || !['context', 'options', 'consequences'].includes(section)) {
@@ -490,19 +554,121 @@ app.post('/api/decisions/:id/suggest', async (req, res) => {
   }
 });
 
+// ─── Decision History (git log) ──────────────────────────
+
+/**
+ * GET /api/decisions/:id/history
+ * Returns git commit history for the decision's MD file.
+ */
+app.get('/api/decisions/:id/history', async (req, res) => {
+  try {
+    const projectId = getProjectId(req);
+    const dir = await projectDecisionsDir(projectId);
+    const { getProject } = await import('./db.js');
+    const project = await getProject(projectId);
+
+    const graph = buildGraph(dir);
+    const node = graph.nodes.find(n => n.id === req.params.id);
+    if (!node) return res.status(404).json({ error: 'Decision not found' });
+
+    const filePath = findDecisionFile(dir, req.params.id);
+    if (!filePath) return res.json([]);
+
+    const relativePath = path.relative(dir, filePath);
+
+    // Determine clone dir for git commands
+    const cloneDir = projectId === 1
+      ? path.resolve(__dirname, '..', 'git-data')
+      : path.resolve(__dirname, '..', `git-data-${projectId}`);
+
+    // If no git repo, return empty history
+    if (!fs.existsSync(path.join(cloneDir, '.git'))) {
+      return res.json([]);
+    }
+
+    // Get file-specific commit log with diffs
+    const fileName = path.basename(filePath);
+    const logFormat = '--pretty=format:"%h|%ad|%s" --date=short';
+    let logOutput: string;
+    try {
+      logOutput = execSync(
+        `git log -p --follow --diff-filter=AMRD ${logFormat} -- "${fileName}"`,
+        { cwd: cloneDir, encoding: 'utf-8', timeout: 10000, maxBuffer: 5 * 1024 * 1024 }
+      );
+    } catch {
+      return res.json([]);
+    }
+
+    // Parse the combined log + diff output into structured entries
+    const entries: any[] = [];
+    const commitBlocks = logOutput.split(/(?=^[a-f0-9]{7,}\|)/m);
+
+    for (const block of commitBlocks) {
+      const lines = block.split('\n');
+      const headerMatch = lines[0]?.match(/^([a-f0-9]{7,})\|(.+?)\|(.+)$/);
+      if (!headerMatch) continue;
+
+      const hash = headerMatch[1];
+      const date = headerMatch[2];
+      const message = headerMatch[3];
+
+      // Extract diff lines
+      const diffLines: string[] = [];
+      let inDiff = false;
+      for (const line of lines) {
+        if (line.startsWith('@@') || line.startsWith('diff --git') || line.startsWith('+++') || line.startsWith('---')) {
+          inDiff = true;
+          continue;
+        }
+        if (inDiff) {
+          if (line.startsWith('+') && !line.startsWith('+++')) {
+            diffLines.push('+' + line.slice(1));
+          } else if (line.startsWith('-') && !line.startsWith('---')) {
+            diffLines.push('-' + line.slice(1));
+          } else if (line.startsWith(' ') && line.trim()) {
+            diffLines.push(' ' + line.slice(1));
+          }
+        }
+      }
+
+      entries.push({ hash, date, message, changes: diffLines.slice(0, 100) });
+    }
+
+    res.json(entries);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // ─── Graph and Decision Routes ───────────────────────────
+
+// Graph cache: { projectId → { graph, timestamp } }
+const graphCache = new Map<number, { graph: any; timestamp: number }>();
+const GRAPH_CACHE_TTL = 5000; // 5 seconds
 
 app.get('/api/graph', async (req, res) => {
   try {
     const projectId = getProjectId(req);
+    const cached = graphCache.get(projectId);
+    if (cached && Date.now() - cached.timestamp < GRAPH_CACHE_TTL) {
+      return res.json(cached.graph);
+    }
     const dir = await projectDecisionsDir(projectId);
     const graph = buildGraph(dir);
+    graphCache.set(projectId, { graph, timestamp: Date.now() });
     res.json(graph);
   } catch (err: any) {
     console.error('Failed to build graph:', err.message);
     res.status(500).json({ error: 'Failed to build graph', detail: err.message });
   }
 });
+
+// Invalidate graph cache when a decision is created/updated/deleted
+function invalidateGraphCache(projectId?: number) {
+  if (projectId) graphCache.delete(projectId);
+  else graphCache.clear();
+}
 
 app.get('/api/decisions/:id', async (req, res) => {
   try {
@@ -571,14 +737,14 @@ app.get('/api/comments/:nodeId', async (req, res) => {
  * Add a comment. Body: { content, parentCommentId }
  * Temporarily uses a default user until OAuth is implemented.
  */
-app.post('/api/comments/:nodeId', async (req, res) => {
+app.post('/api/comments/:nodeId', requireAuth, async (req, res) => {
   try {
     const { content, parentCommentId } = req.body;
     if (!content || !content.trim()) {
       return res.status(400).json({ error: 'Content is required' });
     }
 
-    const userId = req.body.userId || 1;
+    const userId = (req as any).authUser.id;
 
     const comment = await addComment(
       req.params.nodeId, getProjectId(req), userId, content.trim(), parentCommentId || null
@@ -593,12 +759,13 @@ app.post('/api/comments/:nodeId', async (req, res) => {
  * DELETE /api/comments/:commentId
  * Delete a comment (author only).
  */
-app.delete('/api/comments/:commentId', async (req, res) => {
+app.delete('/api/comments/:commentId', requireAuth, async (req, res) => {
   try {
     const commentId = parseInt(req.params.commentId, 10);
-    const userId = parseInt(req.query.userId as string) || 1;
+    const userId = (req as any).authUser.id;
     const deleted = await deleteComment(commentId, userId);
     if (!deleted) return res.status(404).json({ error: 'Comment not found or not owned' });
+    invalidateGraphCache(getProjectId(req));
     res.status(204).end();
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -609,10 +776,10 @@ app.delete('/api/comments/:commentId', async (req, res) => {
  * PUT /api/comments/:commentId
  * Edit a comment. Body: { content }
  */
-app.put('/api/comments/:commentId', async (req, res) => {
+app.put('/api/comments/:commentId', requireAuth, async (req, res) => {
   try {
     const commentId = parseInt(req.params.commentId, 10);
-    const userId = req.body.userId || 1;
+    const userId = (req as any).authUser.id;
     const { content } = req.body;
     if (!content || !content.trim()) return res.status(400).json({ error: 'Content required' });
     const updated = await updateComment(commentId, userId, content.trim());
@@ -640,18 +807,20 @@ app.get('/api/votes/:nodeId', async (req, res) => {
  * POST /api/votes/:nodeId
  * Cast or update a vote. Body: { optionLetter, weight, rationale }
  */
-app.post('/api/votes/:nodeId', async (req, res) => {
+app.post('/api/votes/:nodeId', requireAuth, async (req, res) => {
   try {
     const { optionLetter, weight, rationale } = req.body;
     if (!optionLetter) {
       return res.status(400).json({ error: 'optionLetter is required' });
     }
 
-    const userId = req.body.userId || 1;
+    const userId = (req as any).authUser.id;
+    // Weight is derived from role server-side — client value is ignored
+    const roleWeight = (req as any).authUser.role === 'architect' ? 3 : (req as any).authUser.role === 'senior' ? 2 : 1;
 
     const vote = await castVote(
       req.params.nodeId, getProjectId(req), userId,
-      optionLetter, weight || 1, rationale || null
+      optionLetter, roleWeight, rationale || null
     );
     res.status(201).json(vote);
   } catch (err: any) {
@@ -663,11 +832,12 @@ app.post('/api/votes/:nodeId', async (req, res) => {
  * DELETE /api/votes/:nodeId
  * Remove user vote.
  */
-app.delete('/api/votes/:nodeId', async (req, res) => {
+app.delete('/api/votes/:nodeId', requireAuth, async (req, res) => {
   try {
-    const userId = parseInt(req.query.userId as string) || req.body?.userId || 1;
+    const userId = (req as any).authUser.id;
     const removed = await removeVote(req.params.nodeId, getProjectId(req), userId);
     if (!removed) return res.status(404).json({ error: 'Vote not found' });
+    invalidateGraphCache(getProjectId(req));
     res.status(204).end();
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -676,12 +846,16 @@ app.delete('/api/votes/:nodeId', async (req, res) => {
 
 /**
  * GET /api/options/:nodeId
- * Get custom options for a node (beyond those in the ADR markdown).
+ * Get options for a node from the MD file (source of truth).
  */
 app.get('/api/options/:nodeId', async (req, res) => {
   try {
-    const options = await getCustomOptions(req.params.nodeId, getProjectId(req));
-    res.json(options);
+    const projectId = getProjectId(req);
+    const dir = await projectDecisionsDir(projectId);
+    const graph = buildGraph(dir);
+    const node = graph.nodes.find(n => n.id === req.params.nodeId);
+    if (!node) return res.status(404).json({ error: 'Decision not found' });
+    res.json(node.options || []);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -689,21 +863,36 @@ app.get('/api/options/:nodeId', async (req, res) => {
 
 /**
  * POST /api/options/:nodeId
- * Add a custom option. Body: { letter, title }
+ * Add an option to the MD file. Body: { letter, title }
  */
-app.post('/api/options/:nodeId', async (req, res) => {
+app.post('/api/options/:nodeId', requireAuth, async (req, res) => {
   try {
     const { letter, title } = req.body;
     if (!letter || !title) {
       return res.status(400).json({ error: 'letter and title are required' });
     }
 
-    const userId = req.body.userId || 1;
-    const option = await addCustomOption(
-      req.params.nodeId, getProjectId(req),
-      letter.toUpperCase(), title, userId
-    );
-    res.status(201).json(option);
+    const projectId = getProjectId(req);
+    const dir = await projectDecisionsDir(projectId);
+    const { getProject } = await import('./db.js');
+    const project = await getProject(projectId);
+
+    const filePath = findDecisionFile(dir, req.params.nodeId);
+    if (!filePath) return res.status(404).json({ error: 'Decision file not found' });
+
+    const rawMd = fs.readFileSync(filePath, 'utf-8');
+    const updatedMd = addOptionToMd(rawMd, letter.toUpperCase(), title.trim());
+    fs.writeFileSync(filePath, updatedMd, 'utf-8');
+
+    if (project?.git_repo_url) {
+      const cloneDir = path.resolve(__dirname, '..', `git-data-${projectId}`);
+      try {
+        pushChanges(`Option ${letter}: add to ADR-${req.params.nodeId}`, loadConfig(), cloneDir);
+      } catch (e: any) { console.error('Git push failed (add option):', e.message); }
+    }
+
+    invalidateGraphCache(getProjectId(req));
+    res.status(201).json({ letter: letter.toUpperCase(), title: title.trim() });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -730,7 +919,7 @@ app.get('/api/projects', async (_req, res) => {
 /**
  * POST /api/projects
  */
-app.post('/api/projects', async (req, res) => {
+app.post('/api/projects', requireArchitect, async (req, res) => {
   try {
     const { name, description, git_branch, git_path } = req.body;
     let { git_repo_url } = req.body;
@@ -738,7 +927,7 @@ app.post('/api/projects', async (req, res) => {
 
     // If no explicit repo URL, auto-create via GitHub API
     if (!git_repo_url) {
-      const userId = req.body.userId || 1;
+      const userId = (req as any).authUser.id;
       const token = await getGitToken(userId);
       if (!token) {
         return res.status(400).json({ error: 'No GitHub token. Add PAT in user profile first.' });
@@ -774,17 +963,31 @@ app.post('/api/projects', async (req, res) => {
 
 /**
  * PUT /api/options/:nodeId/:letter
- * Update custom option title. Body: { title }
+ * Update option title in the MD file. Body: { title }
  */
-app.put('/api/options/:nodeId/:letter', async (req, res) => {
+app.put('/api/options/:nodeId/:letter', requireAuth, async (req, res) => {
   try {
     const { title } = req.body;
     if (!title) return res.status(400).json({ error: 'title required' });
-    const result = await updateCustomOption(
-      req.params.nodeId, getProjectId(req), req.params.letter.toUpperCase(), title.trim()
-    );
-    if (!result) return res.status(404).json({ error: 'Option not found' });
-    res.json(result);
+
+    const projectId = getProjectId(req);
+    const dir = await projectDecisionsDir(projectId);
+    const { getProject } = await import('./db.js');
+    const project = await getProject(projectId);
+
+    const filePath = findDecisionFile(dir, req.params.nodeId);
+    if (!filePath) return res.status(404).json({ error: 'Decision file not found' });
+
+    const rawMd = fs.readFileSync(filePath, 'utf-8');
+    const updatedMd = updateOptionInMd(rawMd, req.params.letter.toUpperCase(), title.trim());
+    fs.writeFileSync(filePath, updatedMd, 'utf-8');
+
+    if (project?.git_repo_url) {
+      const cloneDir = path.resolve(__dirname, '..', `git-data-${projectId}`);
+      pushChanges(`Option ${req.params.letter}: rename in ADR-${req.params.nodeId}`, loadConfig(), cloneDir);
+    }
+
+    res.json({ letter: req.params.letter.toUpperCase(), title: title.trim() });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -792,12 +995,30 @@ app.put('/api/options/:nodeId/:letter', async (req, res) => {
 
 /**
  * DELETE /api/options/:nodeId/:letter
- * Delete a custom option.
+ * Remove an option from the MD file.
  */
-app.delete('/api/options/:nodeId/:letter', async (req, res) => {
+app.delete('/api/options/:nodeId/:letter', requireAuth, async (req, res) => {
   try {
-    const deleted = await deleteCustomOption(req.params.nodeId, getProjectId(req), req.params.letter.toUpperCase());
-    if (!deleted) return res.status(404).json({ error: 'Option not found' });
+    const projectId = getProjectId(req);
+    const dir = await projectDecisionsDir(projectId);
+    const { getProject } = await import('./db.js');
+    const project = await getProject(projectId);
+
+    const filePath = findDecisionFile(dir, req.params.nodeId);
+    if (!filePath) return res.status(404).json({ error: 'Decision file not found' });
+
+    const rawMd = fs.readFileSync(filePath, 'utf-8');
+    const updatedMd = removeOptionFromMd(rawMd, req.params.letter.toUpperCase());
+    fs.writeFileSync(filePath, updatedMd, 'utf-8');
+
+    if (project?.git_repo_url) {
+      const cloneDir = path.resolve(__dirname, '..', `git-data-${projectId}`);
+      try {
+        pushChanges(`Option ${req.params.letter}: remove from ADR-${req.params.nodeId}`, loadConfig(), cloneDir);
+      } catch (e: any) { console.error('Git push failed (delete option):', e.message); }
+    }
+
+    invalidateGraphCache(getProjectId(req));
     res.status(204).end();
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -823,7 +1044,7 @@ app.get('/api/users', async (_req, res) => {
  * Create a new ADR. Writes .md file to git, commits + pushes.
  * Body: { title, parent, type, context, options, decision, consequences }
  */
-app.post('/api/decisions', async (req, res) => {
+app.post('/api/decisions', requireAuth, async (req, res) => {
   try {
     const projectId = getProjectId(req);
     const dir = await projectDecisionsDir(projectId);
@@ -849,7 +1070,7 @@ app.post('/api/decisions', async (req, res) => {
     // Push to git if project has a repo
     if (project?.git_repo_url) {
       const cloneDir = path.resolve(__dirname, '..', `git-data-${projectId}`);
-      const pushResult = pushChanges(`ADR-${newId}: ${req.body.title}`, loadConfig());
+      const pushResult = pushChanges(`ADR-${newId}: ${req.body.title}`, loadConfig(), cloneDir);
       res.status(201).json({
         id: newId,
         filename,
@@ -869,7 +1090,7 @@ app.post('/api/decisions', async (req, res) => {
  * Edit an existing ADR. Updates the .md file, commits + pushes.
  * Body: { title, context, options, decision, consequences, status }
  */
-app.put('/api/decisions/:id', async (req, res) => {
+app.put('/api/decisions/:id', requireAuth, async (req, res) => {
   try {
     const projectId = getProjectId(req);
     const dir = await projectDecisionsDir(projectId);
@@ -910,7 +1131,7 @@ app.put('/api/decisions/:id', async (req, res) => {
 
     if (project?.git_repo_url) {
       const cloneDir = path.resolve(__dirname, '..', `git-data-${projectId}`);
-      const pushResult = pushChanges(`Edit ADR-${node.id}: ${req.body.title || node.title}`, loadConfig());
+      const pushResult = pushChanges(`Edit ADR-${node.id}: ${req.body.title || node.title}`, loadConfig(), cloneDir);
       res.json({
         id: node.id,
         pushResult: pushResult.success ? 'pushed' : 'saved locally',
@@ -929,7 +1150,7 @@ app.put('/api/decisions/:id', async (req, res) => {
  * DELETE /api/decisions/:id
  * Delete an ADR file, commit + push.
  */
-app.delete('/api/decisions/:id', async (req, res) => {
+app.delete('/api/decisions/:id', requireAuth, async (req, res) => {
   try {
     const projectId = getProjectId(req);
     const dir = await projectDecisionsDir(projectId);
@@ -946,7 +1167,8 @@ app.delete('/api/decisions/:id', async (req, res) => {
     }
 
     if (project?.git_repo_url) {
-      const pushResult = pushChanges(`Delete ADR-${node.id}: ${node.title}`, loadConfig());
+      const cloneDir = path.resolve(__dirname, '..', `git-data-${projectId}`);
+      const pushResult = pushChanges(`Delete ADR-${node.id}: ${node.title}`, loadConfig(), cloneDir);
       res.json({ id: node.id, pushResult: pushResult.success ? 'pushed' : 'saved locally', message: pushResult.message });
     } else {
       res.json({ id: node.id, message: 'deleted locally (no git repo)' });
@@ -963,7 +1185,7 @@ const analyzingNodes = new Set<string>();
  * POST /api/decisions/:id/analyze
  * Start AI analysis async — returns 202, result available via GET.
  */
-app.post('/api/decisions/:id/analyze', async (req, res) => {
+app.post('/api/decisions/:id/analyze', requireAuth, async (req, res) => {
   try {
     const projectId = getProjectId(req);
     const dir = await projectDecisionsDir(projectId);
@@ -1031,7 +1253,7 @@ app.get('/api/decisions/:id/analysis', async (req, res) => {
  * PUT /api/projects/:id
  * Update project (e.g., set git_repo_url).
  */
-app.put('/api/projects/:id', async (req, res) => {
+app.put('/api/projects/:id', requireArchitect, async (req, res) => {
   try {
     const pid = parseInt(req.params.id, 10);
     const { git_repo_url, name, description } = req.body;
@@ -1066,14 +1288,14 @@ app.get('/api/db-health', async (_req, res) => {
  * POST /api/comments/:commentId/react
  * Toggle like/dislike on a comment. Body: { reaction: 'like' | 'dislike' }
  */
-app.post('/api/comments/:commentId/react', async (req, res) => {
+app.post('/api/comments/:commentId/react', requireAuth, async (req, res) => {
   try {
     const commentId = parseInt(req.params.commentId, 10);
     const { reaction } = req.body;
     if (reaction !== 'like' && reaction !== 'dislike') {
       return res.status(400).json({ error: 'reaction must be like or dislike' });
     }
-    const userId = req.body.userId || 1;
+    const userId = (req as any).authUser.id;
     const result = await toggleReaction(commentId, userId, reaction);
     res.json(result);
   } catch (err: any) {

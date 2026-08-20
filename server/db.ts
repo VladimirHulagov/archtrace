@@ -7,6 +7,7 @@
  */
 
 import pg from 'pg';
+import { createHash, randomBytes } from 'crypto';
 
 const { Pool } = pg;
 
@@ -106,16 +107,6 @@ export interface Vote {
   updated_at: string;
 }
 
-export interface CustomOption {
-  id: number;
-  node_id: string;
-  project_id: number;
-  letter: string;
-  title: string;
-  created_by: number | null;
-  created_at: string;
-}
-
 // ─── Comments API ────────────────────────────────────────
 
 export async function getComments(nodeId: string, projectId: number = 1): Promise<Comment[]> {
@@ -158,14 +149,6 @@ export async function updateComment(commentId: number, userId: number, content: 
     [commentId, userId, content]
   );
   return rows[0] || null;
-}
-
-export async function deleteCustomOption(nodeId: string, projectId: number, letter: string): Promise<boolean> {
-  const rows = await query(
-    'DELETE FROM custom_options WHERE node_id = $1 AND project_id = $2 AND letter = $3 RETURNING id',
-    [nodeId, projectId, letter]
-  );
-  return rows.length > 0;
 }
 
 export async function deleteComment(commentId: number, userId: number): Promise<boolean> {
@@ -219,32 +202,6 @@ export async function removeVote(nodeId: string, projectId: number, userId: numb
     [nodeId, projectId, userId]
   );
   return rows.length > 0;
-}
-
-// ─── Custom Options API ──────────────────────────────────
-
-export async function getCustomOptions(nodeId: string, projectId: number = 1): Promise<CustomOption[]> {
-  return query(
-    'SELECT * FROM custom_options WHERE node_id = $1 AND project_id = $2 ORDER BY created_at ASC',
-    [nodeId, projectId]
-  );
-}
-
-export async function addCustomOption(
-  nodeId: string,
-  projectId: number,
-  letter: string,
-  title: string,
-  createdBy: number | null = null
-): Promise<CustomOption> {
-  const rows = await query(
-    `INSERT INTO custom_options (node_id, project_id, letter, title, created_by)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (node_id, project_id, letter) DO UPDATE SET title = $4
-     RETURNING *`,
-    [nodeId, projectId, letter, title, createdBy]
-  );
-  return rows[0];
 }
 
 
@@ -315,21 +272,6 @@ export async function getReactionsForComments(commentIds: number[], userId: numb
   return result;
 }
 
-// ─── Custom Options Update ───────────────────────────────
-
-export async function updateCustomOption(
-  nodeId: string, projectId: number, letter: string, newTitle: string
-): Promise<CustomOption | null> {
-  const rows = await query(
-    `UPDATE custom_options SET title = $4
-     WHERE node_id = $1 AND project_id = $2 AND letter = $3
-     RETURNING *`,
-    [nodeId, projectId, letter, newTitle]
-  );
-  return rows[0] || null;
-}
-
-
 
 // ─── AI Analysis ─────────────────────────────────────────
 
@@ -356,6 +298,75 @@ ensureGithubTokenColumn().catch(() => {});
 async function ensureGithubTokenColumn() {
   try {
     await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS github_token TEXT');
+  } catch {}
+}
+
+// ─── Sessions (PAT auth) ─────────────────────────────────
+
+// Ensure sessions table exists (safe to call multiple times)
+ensureSessionsTable().catch(() => {});
+async function ensureSessionsTable() {
+  try {
+    await query(`CREATE TABLE IF NOT EXISTS sessions (
+      id SERIAL PRIMARY KEY,
+      token_hash TEXT UNIQUE NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+    await query('CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)');
+    await query('DELETE FROM sessions WHERE expires_at < NOW()');
+  } catch {}
+}
+
+export interface SessionInfo {
+  token: string;
+  user: User;
+  expiresAt: string;
+}
+
+function sha256(s: string): string {
+  return createHash('sha256').update(s).digest('hex');
+}
+
+/** Create a session for user; returns raw session token (stored client-side). */
+export async function createSession(userId: number, ttlDays = 30): Promise<SessionInfo> {
+  const token = randomBytes(32).toString('hex');
+  const hash = sha256(token);
+  await ensureSessionsTable();
+  await query('DELETE FROM sessions WHERE expires_at < NOW()');
+  const rows = await query(
+    "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, NOW() + MAKE_INTERVAL(days => $3)) RETURNING expires_at",
+    [hash, userId, ttlDays]
+  );
+  const user = await getUserById(userId);
+  if (!user) throw new Error('User not found');
+  return { token, user, expiresAt: rows[0].expires_at };
+}
+
+/** Validate session token → user, or null. Updates last_used_at. */
+export async function getSessionUser(token: string): Promise<User | null> {
+  if (!token) return null;
+  const hash = sha256(token);
+  try {
+    const row = await queryOne(
+      'SELECT s.user_id, s.expires_at, u.id, u.github_id, u.username, u.name, u.avatar_url, u.role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND s.expires_at > NOW()',
+      [hash]
+    );
+    if (!row) return null;
+    query('UPDATE sessions SET last_used_at = NOW() WHERE token_hash = $1', [hash]).catch(() => {});
+    return { id: row.id, github_id: row.github_id, username: row.username, name: row.name, avatar_url: row.avatar_url, role: row.role };
+  } catch {
+    return null;
+  }
+}
+
+/** Delete session by raw token. */
+export async function deleteSession(token: string): Promise<void> {
+  try {
+    await ensureSessionsTable();
+    await query('DELETE FROM sessions WHERE token_hash = $1', [sha256(token)]);
   } catch {}
 }
 
