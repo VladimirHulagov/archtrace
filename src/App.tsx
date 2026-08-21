@@ -815,6 +815,7 @@ function NewProjectModal({ onClose, onCreated }: {
   onCreated: (p: Project) => void;
 }) {
   const [name, setName] = useState('');
+  const [repoUrl, setRepoUrl] = useState('');
 
   const [repoPath, setRepoPath] = useState('');
   const [creating, setCreating] = useState(false);
@@ -824,12 +825,14 @@ function NewProjectModal({ onClose, onCreated }: {
 
   const handleCreate = async () => {
     if (!name.trim()) { setError('Введите название проекта'); return; }
+    if (!/^https:\/\/github\.com\//i.test(repoUrl.trim())) { setError('Укажите URL репозитория (https://github.com/<user>/<repo>)'); return; }
     setCreating(true); setError('');
     try {
       const slug = slugify(name.trim());
-      const gitPath = repoPath.trim() || slug;
+      const gitPath = repoPath.trim() || '.';
       const project = await createProjectApi({
         name: name.trim(),
+        git_repo_url: repoUrl.trim(),
         git_branch: 'main',
         git_path: gitPath,
       });
@@ -867,14 +870,27 @@ function NewProjectModal({ onClose, onCreated }: {
           )}
         </div>
 
-        <div style={{ marginBottom: '12px', padding: '8px', background: '#f0f5ff', borderRadius: '4px', border: '1px solid #adc6ff', fontSize: '12px', color: '#2f54eb' }}>
-          📦 Приватный репозиторий <code>{repoPath || slugify(name)}</code> будет создан автоматически через GitHub API
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>URL репозитория *</label>
+          <input type="text" value={repoUrl} onChange={e => setRepoUrl(e.target.value)}
+            placeholder="https://github.com/VladimirHulagov/my-decisions.git"
+            style={{ width: '100%', padding: '8px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'monospace' }}
+          />
+          {name && (
+            <div style={{ fontSize: '11px', color: '#999', marginTop: '4px' }}>
+              Нет репозитория?{' '}
+              <a href={`https://github.com/new?name=${slugify(name)}`} target="_blank" rel="noreferrer" style={{ color: '#1890ff' }}>
+                Создать на GitHub (имя подставится)
+              </a>{' '}
+              — затем вставьте URL сюда. Право Administration у PAT не нужно.
+            </div>
+          )}
         </div>
 
         <div style={{ marginBottom: '12px' }}>
           <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>Директория проекта (внутри репозитория)</label>
           <input type="text" value={repoPath} onChange={e => setRepoPath(e.target.value)}
-            placeholder={autoPath || 'напр: cooling-system'}
+            placeholder={'.'}
             style={{ width: '100%', padding: '8px', border: '1px solid #1890ff', borderRadius: '4px', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'monospace' }}
           />
         </div>

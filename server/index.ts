@@ -179,6 +179,12 @@ async function projectDecisionsDir(projectId: number, skipSync: boolean = false)
         execSync(`git reset --hard origin/${branch}`, { cwd: cloneDir, stdio: 'pipe', timeout: 15000 });
       }
       dir = path.resolve(cloneDir, repoPath);
+      if (!fs.existsSync(dir)) {
+        // git_path points to a non-existent subdir — fall back to clone root
+        // instead of ENOENT (e.g. repo created later, path typo)
+        console.warn(`git_path '${repoPath}' not found in clone for project ${projectId}, using clone root`);
+        dir = cloneDir;
+      }
     } catch (cloneErr: any) {
       // Clone failed — use empty per-project dir, NOT fallback to project 1
       dir = path.resolve(__dirname, '..', `git-data-${projectId}`);
@@ -285,49 +291,6 @@ app.get('/api/sync/status', (_req, res) => {
 
 // ─── GitHub API helpers ──────────────────────────────────
 
-async function githubCreateRepo(token: string, name: string, description: string): Promise<{ success: boolean; repoUrl?: string; error?: string }> {
-  return new Promise((resolve) => {
-    const body = JSON.stringify({
-      name,
-      description,
-      private: true,
-      auto_init: true,
-    });
-    const req = https.request({
-      hostname: 'api.github.com',
-      path: '/user/repos',
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/vnd.github+json',
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body),
-        'User-Agent': 'ArchTrace',
-      },
-    }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          if (res.statusCode === 201) {
-            resolve({ success: true, repoUrl: json.clone_url || json.html_url });
-          } else if (res.statusCode === 422 && json.errors?.some((e: any) => e.code === 'already_exists')) {
-            // Repo already exists — use it
-            resolve({ success: true, repoUrl: json.errors?.[0]?.resource_url || `https://github.com/${json.errors?.[0]?.field}/${name}.git` });
-          } else {
-            resolve({ success: false, error: json.message || `HTTP ${res.statusCode}` });
-          }
-        } catch {
-          resolve({ success: false, error: `Parse error: ${data.substring(0, 200)}` });
-        }
-      });
-    });
-    req.on('error', (err) => resolve({ success: false, error: err.message }));
-    req.write(body);
-    req.end();
-  });
-}
 
 async function githubCheckTokenDetailed(token: string): Promise<{ valid: boolean; username?: string; githubId?: number; name?: string | null; avatarUrl?: string | null; error?: string }> {
   return new Promise((resolve) => {
@@ -921,36 +884,10 @@ app.get('/api/projects', async (_req, res) => {
  */
 app.post('/api/projects', requireArchitect, async (req, res) => {
   try {
-    const { name, description, git_branch, git_path } = req.body;
-    let { git_repo_url } = req.body;
+    const { name, description, git_branch, git_path, git_repo_url } = req.body;
     if (!name) return res.status(400).json({ error: 'name required' });
-
-    // If no explicit repo URL, auto-create via GitHub API
-    if (!git_repo_url) {
-      const userId = (req as any).authUser.id;
-      const token = await getGitToken(userId);
-      if (!token) {
-        return res.status(400).json({ error: 'No GitHub token. Add PAT in user profile first.' });
-      }
-
-      const slug = (git_path || slugifyLatin(name)).replace(/[^a-zA-Z0-9_-]/g, '-');
-      const check = await githubCheckToken(token);
-      if (!check.valid) {
-        return res.status(400).json({ error: `GitHub token invalid: ${check.error}` });
-      }
-
-      const ghUser = check.username!;
-      // Create repo named after slug
-      const result = await githubCreateRepo(token, slug, name);
-      if (!result.success) {
-        const hint = /not accessible|forbidden/i.test(result.error || '')
-          ? '. У PAT нет права создавать репозитории: откройте Settings → Developer settings → Fine-grained tokens → ваш токен → Repository access: All repositories, Permissions → Administration: Read and write (содержимое/Contents уже есть).'
-          : '';
-        return res.status(400).json({ error: `Не удалось создать репозиторий: ${result.error}${hint}` });
-      }
-
-      // Use the returned clone URL, or construct it
-      git_repo_url = result.repoUrl || `https://github.com/${ghUser}/${slug}.git`;
+    if (!git_repo_url || !/^https:\/\/github\.com\//i.test(git_repo_url.trim())) {
+      return res.status(400).json({ error: 'Укажите URL репозитория GitHub (https://github.com/<user>/<repo>). Создайте репозиторий на github.com/new — PAT с правом Administration не требуется.' });
     }
 
     const project = await createProject(
