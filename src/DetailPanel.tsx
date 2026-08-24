@@ -24,9 +24,6 @@ const STATUS_LABELS: Record<string, string> = {
   accepted: 'принято', rejected: 'отклонено', proposed: 'предложено',
   debating: 'обсуждение', superseded: 'заменено',
 };
-const TYPE_LABELS: Record<string, string> = {
-  requirement: 'требование', decision: 'решение', task: 'задача',
-};
 const VOTE_COLORS: Record<string, string> = {
   A: '#52c41a', B: '#fa8c16', C: '#1890ff', D: '#722ed1',
 };
@@ -443,9 +440,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
             <span style={{ padding: '2px 8px', borderRadius: '4px', background: statusColor(detail.status), fontSize: '11px', color: '#fff' }}>
               {STATUS_LABELS[detail.status] || detail.status}
-            </span>
-            <span style={{ padding: '2px 8px', borderRadius: '4px', background: '#e0e0e0', fontSize: '11px' }}>
-              {TYPE_LABELS[detail.type] || detail.type}
             </span>
           </div>
 

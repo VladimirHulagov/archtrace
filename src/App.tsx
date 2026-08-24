@@ -42,7 +42,7 @@ function decisionToTreeNode(d: DecisionNode): TreeNode {
   return {
     id: d.id, x: 0, y: 0, text: d.title, type: 'rich', status: d.status,
     icon: STATUS_ICONS[d.status] || TYPE_ICONS[d.type] || '📄',
-    description: d.type, nodeType: d.type, voteTally, voteSectors, winnerVote, options: [...(d.options || [])].sort((a, b) => a.letter.localeCompare(b.letter)),
+    nodeType: d.type, voteTally, voteSectors, winnerVote, options: [...(d.options || [])].sort((a, b) => a.letter.localeCompare(b.letter)),
     phase: d.phase || (d.type === 'problem' ? 1 : d.type === 'requirement' ? 2 : d.type === 'paradigm' ? 3 : 4),
   };
 }
@@ -307,7 +307,7 @@ function App() {
   // DEL key deletes selected card
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDetail) {
+      if (e.key === 'Delete' && selectedDetail) {
         // Don't interfere with input/textarea
         const target = e.target as HTMLElement;
         if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
