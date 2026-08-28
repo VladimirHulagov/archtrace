@@ -11,7 +11,7 @@ import {
 } from './api';
 import { calculateLayout } from './SimpleTree/utils/positions';
 import {
-  fetchGitInfo, revertGit, createProjectApi,
+  fetchGitInfo, revertGit, createProjectApi, deleteProjectApi,
   loginWithPat, fetchMe, logout,
   type AuthUser,
 } from './api';
@@ -67,6 +67,7 @@ function App() {
   const [gitInfo, setGitInfo] = useState<{ commitHash: string | null; repoUrl: string | null; prevHash: string | null }>({ commitHash: null, repoUrl: null, prevHash: null });
   const [reverting, setReverting] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const [detailAsModal, setDetailAsModal] = useState(false);
   // PAT modal superseded by login modal
   const [gitSyncStatus, setGitSyncStatus] = useState<'synced' | 'pending' | 'error' | 'none'>('none');
@@ -203,6 +204,24 @@ function App() {
       setGitInfo({ commitHash: null, repoUrl: null, prevHash: null });
     }
   }, []);
+
+  const handleProjectDeleted = useCallback(async (deletedId: number) => {
+    setDeletingProject(null);
+    setShowProjectMenu(false);
+    const updated = await fetchProjects().catch(() => []);
+    setProjects(updated);
+    if (currentProject?.id === deletedId) {
+      setSelectedDetail(null);
+      setComments([]); setVotes([]);
+      if (updated.length > 0) {
+        await handleProjectSwitch(updated[0]);
+      } else {
+        setCurrentProject(null);
+        setNodes([]); setConnections([]); setEdgePoints(new Map()); setPhaseBands([]);
+        setGitInfo({ commitHash: null, repoUrl: null, prevHash: null });
+      }
+    }
+  }, [currentProject, handleProjectSwitch]);
 
   const handleNodeDrag = useCallback((nodeId: string, x: number, y: number) => {
     setNodes(prev => prev.map(n => n.id === nodeId ? { ...n, x, y } : n));
@@ -499,9 +518,22 @@ function App() {
                 borderBottom: '1px solid #f0f0f0',
                 background: currentProject?.id === p.id ? '#e6f7ff' : '#fff',
                 fontSize: '13px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
               }}>
-                <div style={{ fontWeight: 'bold' }}>{p.name}</div>
-                {p.description && <div style={{ fontSize: '11px', color: '#999' }}>{p.description}</div>}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 'bold' }}>{p.name}</div>
+                  {p.description && <div style={{ fontSize: '11px', color: '#999' }}>{p.description}</div>}
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setDeletingProject(p); }}
+                  title={`Удалить «${p.name}»`}
+                  style={{
+                    border: 'none', background: 'none', cursor: 'pointer',
+                    fontSize: '13px', color: '#bfbfbf', padding: '2px 4px', flexShrink: 0,
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = '#ff4d4f'}
+                  onMouseLeave={(e) => e.currentTarget.style.color = '#bfbfbf'}
+                >🗑</button>
               </div>
             ))}
             <div onClick={() => { setShowNewProjectModal(true); setShowProjectMenu(false); }} style={{
@@ -691,6 +723,15 @@ function App() {
 
 
 
+      {/* Delete Project Modal */}
+      {deletingProject && (
+        <DeleteProjectModal
+          project={deletingProject}
+          onClose={() => setDeletingProject(null)}
+          onDeleted={handleProjectDeleted}
+        />
+      )}
+
       {/* Login Modal (GitHub PAT) */}
       {showLoginModal && (
         <LoginModal
@@ -788,6 +829,67 @@ function LoginModal({ onClose, onLoggedIn }: {
           }}>
             {busy ? 'Проверка...' : 'Войти (Enter)'}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── DeleteProjectModal ──────────────────────────────────
+
+function DeleteProjectModal({ project, onClose, onDeleted }: {
+  project: Project;
+  onClose: () => void;
+  onDeleted: (id: number) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleDelete = async () => {
+    setBusy(true); setError('');
+    try {
+      await deleteProjectApi(project.id);
+      onDeleted(project.id);
+    } catch (err: any) {
+      setError(err.message || 'Не удалось удалить проект');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 3000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }} onClick={busy ? undefined : onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: '8px', padding: '24px',
+        width: '440px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+      }}>
+        <h2 style={{ margin: '0 0 16px 0', fontSize: '18px' }}>🗑 Удалить проект?</h2>
+        <p style={{ fontSize: '14px', color: '#333', margin: '0 0 12px 0' }}>
+          Удалить <b>«{project.name}»</b> из списка проектов?
+        </p>
+        <div style={{
+          fontSize: '12px', color: '#666', lineHeight: 1.6,
+          background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: '4px', padding: '10px',
+        }}>
+          Будут удалены безвозвратно:
+          <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+            <li>локальная копия ADR-файлов проекта</li>
+            <li>комментарии, голоса и AI-анализы</li>
+          </ul>
+          Репозиторий на GitHub <b>не удаляется</b>.
+        </div>
+        {error && <div style={{ color: '#ff4d4f', fontSize: '12px', marginTop: '8px' }}>{error}</div>}
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
+          <button onClick={onClose} disabled={busy} style={{
+            padding: '8px 16px', border: '1px solid #d0d0d0', background: '#f0f0f0',
+            borderRadius: '4px', cursor: busy ? 'wait' : 'pointer', fontSize: '13px',
+          }}>Отмена</button>
+          <button onClick={handleDelete} disabled={busy} style={{
+            padding: '8px 16px', border: 'none', borderRadius: '4px', cursor: busy ? 'wait' : 'pointer',
+            background: busy ? '#ff7875' : '#ff4d4f', color: '#fff', fontSize: '13px', fontWeight: 'bold',
+          }}>{busy ? 'Удаление...' : 'Удалить'}</button>
         </div>
       </div>
     </div>

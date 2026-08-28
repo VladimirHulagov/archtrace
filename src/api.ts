@@ -265,6 +265,16 @@ export async function createProjectApi(data: {
 }
 
 
+export async function deleteProjectApi(id: number): Promise<void> {
+  const res = await authFetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    let msg = `Не удалось удалить проект (HTTP ${res.status})`;
+    try { const j = await res.json(); if (j.error) msg = j.error; } catch {}
+    throw new Error(msg);
+  }
+}
+
+
 // Current project ID — updated when user switches project
 let _currentProjectId = 1;
 export function setProjectId(id: number) { _currentProjectId = id; }

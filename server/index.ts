@@ -1218,6 +1218,39 @@ app.put('/api/projects/:id', requireArchitect, async (req, res) => {
   }
 });
 
+/**
+ * DELETE /api/projects/:id
+ * Remove project from the list: DB row (comments/votes/ai_analyses cascade),
+ * local git clone dir, caches. The GitHub repository itself is NOT touched.
+ */
+app.delete('/api/projects/:id', requireArchitect, async (req, res) => {
+  try {
+    const pid = parseInt(req.params.id, 10);
+    if (isNaN(pid)) return res.status(400).json({ error: 'Invalid project id' });
+
+    const { getProject } = await import('./db.js');
+    const project = await getProject(pid);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    // Delete DB row — comments, votes, ai_analyses, teams cascade via FK
+    await query('DELETE FROM projects WHERE id = $1', [pid]);
+
+    // Remove local clone git-data-<pid>
+    const cloneDir = path.resolve(__dirname, '..', `git-data-${pid}`);
+    if (fs.existsSync(cloneDir)) {
+      fs.rmSync(cloneDir, { recursive: true, force: true });
+    }
+
+    // Invalidate caches
+    projectDirCache.delete(pid);
+    graphCache.delete(pid);
+
+    res.json({ status: 'ok', id: pid });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/db-health', async (_req, res) => {
   const ok = await checkDb();
   res.json({ db: ok ? 'ok' : 'error' });
