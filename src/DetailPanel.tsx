@@ -45,12 +45,14 @@ export interface DetailPanelProps {
   onClose: () => void;
   onDeleteNode?: () => void;
   initialMode?: 'sidebar' | 'modal';
+  readOnly?: boolean; // historical view: no editing
 }
 
 export const DetailPanel: React.FC<DetailPanelProps> = ({
   detail, comments, votes,
   currentUserId, currentRole,
   onCommentsChange, onVotesChange, onOptionsChange, onTitleChange, onBodyChange, onClose, onDeleteNode, initialMode,
+  readOnly = false,
 }) => {
   const [mode, setMode] = useState<PanelMode>(initialMode || 'sidebar');
   const [width, setWidth] = useState(420);
@@ -380,7 +382,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             {STATUS_ICONS[detail.status] || '📄'} ADR-{detail.id}
           </h2>
           <div style={{ display: 'flex', gap: '8px' }}>
-            {onDeleteNode && (
+            {onDeleteNode && !readOnly && (
               <button
                 onClick={() => { if (confirm('Удалить карточку?')) onDeleteNode(); }}
                 title="Удалить карточку"
@@ -428,11 +430,13 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <h3 style={{ marginTop: 0, fontSize: '15px', margin: 0 }}>{detail.title}</h3>
-              <button
-                onClick={() => { setEditingTitle(detail.title); setIsEditingTitle(true); }}
-                title="Редактировать название"
-                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '14px', color: '#1890ff', padding: '0' }}
-              >✏️</button>
+              {!readOnly && (
+                <button
+                  onClick={() => { setEditingTitle(detail.title); setIsEditingTitle(true); }}
+                  title="Редактировать название"
+                  style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '14px', color: '#1890ff', padding: '0' }}
+                >✏️</button>
+              )}
             </div>
           )}
 
@@ -445,7 +449,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
           {/* КОНТЕКСТ */}
           <Section title="Контекст" accent="#1890ff"
-            extra={(
+            extra={readOnly ? undefined : (
               <button
                 onClick={() => handleSuggest('context')}
                 disabled={suggestingSection === 'context'}
@@ -477,7 +481,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                   <ReactMarkdown>{sections.context || '*Контекст не указан*'}</ReactMarkdown>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                  <button onClick={() => { setEditingContext(sections.context || ''); setIsEditingContext(true); }} style={btnLink}>✏️ Редактировать</button>
+                  {!readOnly && <button onClick={() => { setEditingContext(sections.context || ''); setIsEditingContext(true); }} style={btnLink}>✏️ Редактировать</button>}
                   <button onClick={() => { if (!showHistory) loadHistory(); setShowHistory(!showHistory); }} style={btnLink}>📜 История</button>
                 </div>
                 {(suggestingSection === 'context' || (suggestingSection === null && suggestedContent && suggestedSectionName === 'context')) && (
@@ -534,7 +538,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
           {/* ОПЦИИ */}
           <Section title="Опции" accent="#722ed1"
-            extra={(
+            extra={readOnly ? undefined : (
               <button
                 onClick={() => handleSuggest('options')}
                 disabled={suggestingSection === 'options'}
@@ -609,7 +613,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 </div>
               </div>
             )}
-            {!showAddOption && (
+            {!showAddOption && !readOnly && (
               <button onClick={() => setShowAddOption(true)} style={{ ...btnLink, marginBottom: '8px' }}>+ Добавить вариант</button>
             )}
             {(suggestingSection === 'options' || (suggestingSection === null && suggestedContent && suggestedSectionName === 'options')) && (
@@ -715,7 +719,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
           {/* ПОСЛЕДСТВИЯ */}
           <Section title="Последствия" accent="#fa8c16"
-            extra={(
+            extra={readOnly ? undefined : (
               <button
                 onClick={() => handleSuggest('consequences')}
                 disabled={suggestingSection === 'consequences'}
@@ -746,9 +750,11 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                   <ReactMarkdown>{aiAnalysis}</ReactMarkdown>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                  <button onClick={handleAnalyze} style={{
-                    ...btnLink, color: '#fa541c',
-                  }}>🔄 Обновить анализ</button>
+                  {!readOnly && (
+                    <button onClick={handleAnalyze} style={{
+                      ...btnLink, color: '#fa541c',
+                    }}>🔄 Обновить анализ</button>
+                  )}
                   <button onClick={() => setAiAnalysis(null)} style={{
                     ...btnLink, color: '#999',
                   }}>✕ Закрыть</button>
@@ -903,6 +909,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             })}
 
             {/* Comment input */}
+            {!readOnly && (
             <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
               <input
                 type="text" placeholder="Написать комментарий..."
@@ -917,6 +924,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 color: '#fff', cursor: commentText.trim() ? 'pointer' : 'not-allowed', fontSize: '13px',
               }}>Отправить</button>
             </div>
+            )}
           </Section>
 
           <div style={{ marginTop: '16px', paddingTop: '8px', borderTop: '1px solid #e0e0e0', fontSize: '11px', color: '#aaa' }}>

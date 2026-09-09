@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { TransformWrapper, TransformComponent, useTransformComponent } from 'react-zoom-pan-pinch';
-import { TreeNode, SimpleTreeProps } from './types';
+import { TreeNode, SimpleTreeProps, Point } from './types';
+import type { TreeNodeProps } from './TreeNode';
 import { TreeNodeComponent } from './TreeNode';
 import { Connection as ConnectionComponent, resetLanes } from './Connection';
 import { computePortOffsets, computeBendYs, type PortOffset } from './utils/positions';
@@ -64,6 +65,63 @@ const PhaseLabelsOverlay: React.FC<{ phaseBands: any[] }> = ({ phaseBands }) => 
   );
 };
 
+/**
+ * AnimatedNode — renders a TreeNodeComponent whose x/y smoothly eases
+ * toward the layout position. Used for graph state transitions (timeline).
+ */
+const AnimatedNode: React.FC<TreeNodeProps & { isAnimated?: boolean }> = (props) => {
+  const { node } = props;
+  const prevPos = useRef({ x: node.x, y: node.y });
+  const [pos, setPos] = useState({ x: node.x, y: node.y });
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!props.isAnimated) {
+      // Snap when animation disabled (e.g. manual drag target updates)
+      prevPos.current = { x: node.x, y: node.y };
+      setPos({ x: node.x, y: node.y });
+      return;
+    }
+    const from = prevPos.current;
+    const dx = node.x - from.x;
+    const dy = node.y - from.y;
+    prevPos.current = { x: node.x, y: node.y };
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+      setPos({ x: node.x, y: node.y });
+      return;
+    }
+    const start = performance.now();
+    const dur = 450;
+    const tick = (t: number) => {
+      const p = Math.min(1, (t - start) / dur);
+      const e = 1 - Math.pow(1 - p, 3); // easeOutCubic
+      setPos({ x: from.x + dx * e, y: from.y + dy * e });
+      if (p < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [node.x, node.y, props.isAnimated]);
+
+  return <TreeNodeComponent {...props} node={{ ...node, x: pos.x, y: pos.y }} />;
+};
+
+/** Recompute a simple orthogonal route between the *animated* node positions. */
+function animatedEdgePoints(fromNode: TreeNode, toNode: TreeNode): Point[] {
+  const { width: fw, height: fh } = getNodeSize(fromNode);
+  const { width: tw } = getNodeSize(toNode);
+  const fx = fromNode.x + fw / 2;
+  const fy = fromNode.y + fh;
+  const tx = toNode.x + tw / 2;
+  const ty = toNode.y;
+  const midY = (fy + ty) / 2;
+  return [
+    { x: fx, y: fy },
+    { x: fx, y: midY },
+    { x: tx, y: midY },
+    { x: tx, y: ty },
+  ];
+}
+
 export const Tree: React.FC<TreeProps> = ({
   nodes,
   connections,
@@ -86,7 +144,12 @@ export const Tree: React.FC<TreeProps> = ({
   const [isConnectionMode, setIsConnectionMode] = useState(false);
   const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
   const [editingNode, setEditingNode] = useState<TreeNode | null>(null);
+  // Transitioning between graph states (e.g. timeline navigation): animate movement
+  const [isAnimating, setIsAnimating] = useState(false);
+  const animTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nodesVersionRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const prevNodesRef = useRef<TreeNode[]>([]);
   const transformRef = useRef<any>(null);
   const announcementRef = useRef<HTMLDivElement>(null);
 
@@ -103,6 +166,31 @@ export const Tree: React.FC<TreeProps> = ({
   // Compute port offsets: distribute entry/exit points across node edges
   const portOffsets = useMemo(() => computePortOffsets(connections), [connections]);
   const bendYs = useMemo(() => computeBendYs(connections, nodes, portOffsets), [connections, nodes, portOffsets]);
+
+  // When the whole layout shifts (timeline jump / reload), animate the transition
+  useEffect(() => {
+    // compute median node displacement vs previous render
+    const moved = prevNodesRef.current;
+    if (moved.length > 0 && nodes.length > 0) {
+      const prevMap = new Map(moved.map(n => [n.id, n]));
+      let movedCount = 0;
+      let total = 0;
+      nodes.forEach(n => {
+        const p = prevMap.get(n.id);
+        if (!p) return;
+        total++;
+        if (Math.abs(p.x - n.x) > 1 || Math.abs(p.y - n.y) > 1) movedCount++;
+      });
+      // Most nodes moved → state transition (not a single drag)
+      if (total > 0 && movedCount / total > 0.5) {
+        setIsAnimating(true);
+        if (animTimerRef.current) clearTimeout(animTimerRef.current);
+        animTimerRef.current = setTimeout(() => setIsAnimating(false), 600);
+      }
+    }
+    prevNodesRef.current = nodes;
+    nodesVersionRef.current += 1;
+  }, [nodes]);
 
   const bounds = useMemo(() => {
     if (nodes.length === 0) return { width: 0, height: 0 };
@@ -548,7 +636,7 @@ export const Tree: React.FC<TreeProps> = ({
               const fromNode = nodeMap.get(conn.from);
               const toNode = nodeMap.get(conn.to);
               if (!fromNode || !toNode) return null;
-              const pts = edgePoints?.get(conn.id) || [];
+              const pts = isAnimating ? animatedEdgePoints(fromNode, toNode) : (edgePoints?.get(conn.id) || []);
               if (pts.length < 2) return null;
               const ports = portOffsets.get(conn.id);
               return (
@@ -570,7 +658,7 @@ export const Tree: React.FC<TreeProps> = ({
           </svg>
           
           {nodes.map((node) => (
-            <TreeNodeComponent
+            <AnimatedNode
               key={node.id}
               node={node}
               isSelected={selectedNodeId === node.id}
@@ -583,6 +671,7 @@ export const Tree: React.FC<TreeProps> = ({
               onConnectionStart={handleConnectionStart}
               onConnectionEnd={handleConnectionEnd}
               onDeleteNode={onDeleteNode}
+              isAnimated={isAnimating}
             />
           ))}
         </TransformComponent>

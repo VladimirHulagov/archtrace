@@ -11,6 +11,7 @@ import express from 'express';
 import https from 'https';
 import cors from 'cors';
 import path from 'path';
+import os from 'os';
 import fs from 'fs';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
@@ -604,6 +605,120 @@ app.get('/api/decisions/:id/history', async (req, res) => {
 });
 
 
+// ─── Repo commit timeline (ADR-affecting commits) ────────
+
+/** Resolve the git clone dir for a project (git-data for project 1). */
+function projectCloneDir(projectId: number): string {
+  return projectId === 1
+    ? path.resolve(__dirname, '..', 'git-data')
+    : path.resolve(__dirname, '..', `git-data-${projectId}`);
+}
+
+/**
+ * GET /api/graph/commits
+ * Returns commits that touched ADR .md files (newest first).
+ * Query: ?projectId=N
+ */
+app.get('/api/graph/commits', async (req, res) => {
+  try {
+    const projectId = getProjectId(req);
+    const { getProject } = await import('./db.js');
+    const project = await getProject(projectId);
+    if (!project?.git_repo_url) {
+      return res.json({ commits: [] });
+    }
+
+    const cloneDir = projectCloneDir(projectId);
+    if (!fs.existsSync(path.join(cloneDir, '.git'))) {
+      return res.json({ commits: [] });
+    }
+
+    // Refresh from origin so the timeline reflects the remote branch
+    const branch = project.git_branch || 'main';
+    try {
+      execSync(`git fetch origin ${branch}`, {
+        cwd: cloneDir, stdio: 'pipe', timeout: 30000,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      });
+    } catch { /* offline — use local history */ }
+
+    // Commits that added/modified/deleted/renamed .md files
+    const logFormat = '--pretty=format:"%h|%H|%ad|%s" --date=iso-strict';
+    let output: string;
+    try {
+      output = execSync(
+        `git log --all --no-merges ${logFormat} --diff-filter=AMDR -- "*.md"`,
+        { cwd: cloneDir, encoding: 'utf-8', timeout: 15000, maxBuffer: 5 * 1024 * 1024 }
+      );
+    } catch {
+      return res.json({ commits: [] });
+    }
+
+    const commits = output.split('\n')
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map(line => {
+        // %s may itself contain '|', so split with limit 4
+        const parts = line.split('|');
+        const hash = parts.shift() || '';
+        const fullHash = parts.shift() || '';
+        const date = parts.shift() || '';
+        const message = parts.join('|');
+        return { hash, fullHash, date, message };
+      })
+      .filter(c => c.hash && c.date);
+
+    res.json({ commits });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/graph?ref=<hash|branch>  (ref optional — current state when absent)
+ * Builds the graph from the tree of a given commit WITHOUT touching the
+ * working clone: files are exported via `git archive` into a temp dir.
+ */
+function graphFromRef(req: express.Request): Promise<{ graph: any; tempDir: string | null }> {
+  return (async () => {
+    const projectId = getProjectId(req);
+    const ref = (req.query.ref as string || '').trim();
+    const dir = await projectDecisionsDir(projectId);
+
+    if (!ref || !/^[a-zA-Z0-9._~:/\-]+$/.test(ref)) {
+      return { graph: buildGraph(dir), tempDir: null };
+    }
+
+    const cloneDir = projectCloneDir(projectId);
+    if (!fs.existsSync(path.join(cloneDir, '.git'))) {
+      return { graph: buildGraph(dir), tempDir: null };
+    }
+
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archtrace-ref-'));
+    const repoPath = path.relative(cloneDir, dir);
+
+    try {
+      // Validate ref exists — throws on unknown ref
+      execSync(`git cat-file -e ${ref} --`, { cwd: cloneDir, stdio: 'pipe', timeout: 10000 });
+
+      if (repoPath && repoPath !== '.' && !repoPath.startsWith('..')) {
+        execSync(`git archive ${ref} -- "${repoPath}" | tar -x -C "${tempDir}"`, {
+          cwd: cloneDir, stdio: 'pipe', timeout: 30000, shell: '/bin/sh',
+        });
+        return { graph: buildGraph(path.join(tempDir, repoPath)), tempDir };
+      }
+      // Decisions live at repo root
+      execSync(`git archive ${ref} | tar -x -C "${tempDir}"`, {
+        cwd: cloneDir, stdio: 'pipe', timeout: 30000, shell: '/bin/sh',
+      });
+      return { graph: buildGraph(tempDir), tempDir };
+    } catch (err) {
+      try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
+      throw err;
+    }
+  })();
+}
+
 // ─── Graph and Decision Routes ───────────────────────────
 
 // Graph cache: { projectId → { graph, timestamp } }
@@ -611,8 +726,18 @@ const graphCache = new Map<number, { graph: any; timestamp: number }>();
 const GRAPH_CACHE_TTL = 5000; // 5 seconds
 
 app.get('/api/graph', async (req, res) => {
+  let tempDir: string | null = null;
   try {
     const projectId = getProjectId(req);
+    const ref = (req.query.ref as string || '').trim();
+
+    // Historical view: build from commit tree, never cached, never touches the clone
+    if (ref) {
+      const { graph, tempDir: td } = await graphFromRef(req);
+      tempDir = td;
+      return res.json(graph);
+    }
+
     const cached = graphCache.get(projectId);
     if (cached && Date.now() - cached.timestamp < GRAPH_CACHE_TTL) {
       return res.json(cached.graph);
@@ -624,6 +749,8 @@ app.get('/api/graph', async (req, res) => {
   } catch (err: any) {
     console.error('Failed to build graph:', err.message);
     res.status(500).json({ error: 'Failed to build graph', detail: err.message });
+  } finally {
+    if (tempDir) { try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {} }
   }
 });
 
@@ -634,11 +761,19 @@ function invalidateGraphCache(projectId?: number) {
 }
 
 app.get('/api/decisions/:id', async (req, res) => {
+  let tempDir: string | null = null;
   try {
     const projectId = getProjectId(req);
-    const dir = await projectDecisionsDir(projectId);
-    const graph = buildGraph(dir);
-    const node = graph.nodes.find(n => n.id === req.params.id);
+    const ref = (req.query.ref as string || '').trim();
+    let graph: any;
+    if (ref && /^[a-zA-Z0-9._~:/\-]+$/.test(ref)) {
+      const r = await graphFromRef(req);
+      graph = r.graph; tempDir = r.tempDir;
+    } else {
+      const dir = await projectDecisionsDir(projectId);
+      graph = buildGraph(dir);
+    }
+    const node = graph.nodes.find((n: any) => n.id === req.params.id);
     if (!node) {
       return res.status(404).json({ error: 'Decision not found' });
     }
@@ -648,6 +783,8 @@ app.get('/api/decisions/:id', async (req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  } finally {
+    if (tempDir) { try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {} }
   }
 });
 

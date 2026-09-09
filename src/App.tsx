@@ -18,6 +18,7 @@ import {
 import type { Point } from './SimpleTree/types';
 import ReactMarkdown from 'react-markdown';
 import { DetailPanel } from './DetailPanel';
+import Timeline, { type TimelineCommit } from './Timeline';
 
 const STATUS_ICONS: Record<string, string> = {
   accepted: '✅', rejected: '❌', proposed: '💡', debating: '🔥', superseded: '⏭️',
@@ -82,6 +83,10 @@ function App() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [votes, setVotes] = useState<Vote[]>([]);
 
+  // ─── Timeline / history state ───
+  const [commits, setCommits] = useState<TimelineCommit[]>([]);
+  const [histIndex, setHistIndex] = useState<number | null>(null); // null = current state
+  const [histLoading, setHistLoading] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [newOptionLetter, setNewOptionLetter] = useState('');
   const [newOptionTitle, setNewOptionTitle] = useState('');
@@ -90,6 +95,17 @@ function App() {
   // ─── ALL useCallback hooks (before any early return) ───
 
   const [phaseBands, setPhaseBands] = useState<any[]>([]);
+
+  /** Load commits list for the timeline (once per project). */
+  const loadCommits = useCallback(async (pid: number): Promise<TimelineCommit[]> => {
+    try {
+      const data = await fetch(`/api/graph/commits?projectId=${pid}`).then(r => r.json());
+      const list: TimelineCommit[] = data.commits || [];
+      setCommits(list);
+      return list;
+    } catch { setCommits([]); return []; }
+  }, []);
+
   const reloadGraph = useCallback(async () => {
     const graph = await fetchGraph(currentProject?.id || 1);
     const treeNodes = graph.nodes.map(decisionToTreeNode);
@@ -103,7 +119,53 @@ function App() {
       setGitInfo(info);
       setGitSyncStatus(info.commitHash ? 'synced' : 'none');
     }).catch(() => { setGitSyncStatus('error'); });
-  }, [currentProject]);
+    loadCommits(currentProject?.id || 1);
+  }, [currentProject, loadCommits]);
+
+  /** Put a fetched graph onto the canvas (shared by current & historical loads). */
+  const applyGraph = useCallback((graph: Graph) => {
+    const treeNodes = graph.nodes.map(decisionToTreeNode);
+    const treeConnections = graph.connections.map(c => ({ id: c.id, from: c.from, to: c.to, kind: c.kind }));
+    const { nodes: positioned, edgePoints: ePoints, phaseBands: pBands } = calculateLayout(treeNodes, treeConnections, window.innerWidth);
+    setNodes(positioned);
+    setConnections(treeConnections);
+    setEdgePoints(ePoints);
+    setPhaseBands(pBands);
+  }, []);
+
+  /** View the graph at a historical commit. */
+  const handleSelectCommit = useCallback(async (index: number) => {
+    const c = commits[index];
+    if (!c) return;
+    setHistLoading(true);
+    try {
+      const graph = await fetch(`/api/graph?projectId=${currentProject?.id || 1}&ref=${encodeURIComponent(c.fullHash || c.hash)}`).then(r => {
+        if (!r.ok) throw new Error('failed');
+        return r.json();
+      });
+      applyGraph(graph);
+      setHistIndex(index);
+      setSelectedDetail(null);
+      setComments([]); setVotes([]);
+    } catch (err) {
+      console.error('Failed to load historical graph:', err);
+    } finally {
+      setHistLoading(false);
+    }
+  }, [commits, currentProject, applyGraph]);
+
+  /** Return to the current (HEAD) state. */
+  const handleBackToCurrent = useCallback(async () => {
+    setHistLoading(true);
+    try {
+      const graph = await fetchGraph(currentProject?.id || 1);
+      applyGraph(graph);
+      setHistIndex(null);
+      setSelectedDetail(null);
+    } finally {
+      setHistLoading(false);
+    }
+  }, [currentProject, applyGraph]);
 
   const handleSync = useCallback(async () => {
     setSyncing(true);
@@ -142,6 +204,7 @@ function App() {
   const handleUpdateNode = useCallback(async (updatedNode: TreeNode) => {
     // Check if this is a new node (starts with 'new-')
     if (updatedNode.id.startsWith('new-') && updatedNode.text.trim()) {
+      if (histIndex !== null) { setNodes(prev => prev.filter(n => n.id !== updatedNode.id)); setPendingNewNode(null); return; }
       try {
         const result = await createDecision({
           title: updatedNode.text.trim(),
@@ -173,6 +236,8 @@ function App() {
     try { localStorage.setItem('archtrace-pid', String(project.id)); } catch {}
     setShowProjectMenu(false);
     setSelectedDetail(null);
+    setHistIndex(null);
+    loadCommits(project.id);
 
     // If project has no git repo, show setup modal
     if (!project.git_repo_url) {
@@ -228,6 +293,7 @@ function App() {
   }, []);
 
   const handleAddNode = useCallback((parentId?: string) => {
+    if (histIndex !== null) return; // read-only in history view
     const parentNode = parentId ? nodes.find(n => n.id === parentId) : null;
     const newId = `new-${nodeIdCounter.current++}`;
     const isRoot = !parentNode;
@@ -245,6 +311,7 @@ function App() {
   }, [nodes]);
 
   const handleDeleteNode = useCallback((nodeId: string) => {
+    if (histIndex !== null) { alert('Просмотр истории: удаление недоступно. Вернитесь к текущему состоянию.'); return; }
     if (!confirm('Удалить карточку?')) return;
     fetch(`/api/decisions/${nodeId}`, {
       method: 'DELETE',
@@ -317,11 +384,12 @@ function App() {
     const params = new URLSearchParams();
     if (currentProject) params.set('project', String(currentProject.id));
     if (selectedDetail) params.set('node', selectedDetail.id);
+    if (histIndex !== null && commits[histIndex]) params.set('ref', commits[histIndex].fullHash || commits[histIndex].hash);
     const hash = params.toString();
     if (hash && window.location.hash !== '#' + hash) {
       window.location.hash = hash;
     }
-  }, [currentProject, selectedDetail]);
+  }, [currentProject, selectedDetail, histIndex, commits]);
 
   // DEL key deletes selected card
   useEffect(() => {
@@ -342,13 +410,18 @@ function App() {
     // Don't try to fetch detail for unsaved local nodes (new-XXX)
     if (node.id.startsWith('new-')) return;
     setDetailAsModal(window.innerWidth < 768);
-    fetch(`/api/decisions/${node.id}?projectId=${currentProject?.id || 1}`).then(r => r.json()).then(data => {
+    const refParam = histIndex !== null && commits[histIndex]
+      ? `&ref=${encodeURIComponent(commits[histIndex].fullHash || commits[histIndex].hash)}`
+      : '';
+    fetch(`/api/decisions/${node.id}?projectId=${currentProject?.id || 1}${refParam}`).then(r => r.json()).then(data => {
       setSelectedDetail(data);
       setComments([]); setVotes([]);
-      fetchComments(node.id).then(setComments).catch(() => {});
-      fetchVotes(node.id).then(setVotes).catch(() => {});
+      if (histIndex === null) {
+        fetchComments(node.id).then(setComments).catch(() => {});
+        fetchVotes(node.id).then(setVotes).catch(() => {});
+      }
     }).catch(() => setSelectedDetail(null));
-  }, [currentProject]);
+  }, [currentProject, histIndex, commits]);
 
   // ─── Fetch graph on mount ──────────────────────────────
 
@@ -374,16 +447,22 @@ function App() {
     window.addEventListener('archtrace-auth-required', onAuthRequired);
     window.addEventListener('archtrace-auth-changed', onAuthChanged);
 
-    fetchGraph(initialPid).then((graph: Graph) => {
+    // Deep link: restore historical view from ?ref=<hash>
+    const initialRef = params.get('ref');
+
+    // Graph loading: deep-link ref present => load ONLY the historical graph (no race with current);
+    // otherwise load the current graph. Single source of truth for the first paint.
+    const applyCurrentGraph = (graph: Graph) => {
       const treeNodes = graph.nodes.map(decisionToTreeNode);
       const treeConnections = graph.connections.map(c => ({ id: c.id, from: c.from, to: c.to, kind: c.kind }));
       const { nodes: positioned, edgePoints: ePoints, phaseBands: pBands } = calculateLayout(treeNodes, treeConnections, window.innerWidth);
       setNodes(positioned); setConnections(treeConnections); setEdgePoints(ePoints); setPhaseBands(pBands); setLoading(false);
       fetchGitInfo().then(info => { setGitInfo(info); setGitSyncStatus(info.commitHash ? 'synced' : 'none'); }).catch(() => setGitSyncStatus('error'));
 
-      // Restore selected node
+      // Restore selected node (historical version if ref is present)
       if (initialNode) {
-        fetch(`/api/decisions/${initialNode}?projectId=${initialPid}`)
+        const refQ = initialRef ? `&ref=${encodeURIComponent(initialRef)}` : '';
+        fetch(`/api/decisions/${initialNode}?projectId=${initialPid}${refQ}`)
           .then(r => r.json()).then(data => {
             if (data && data.id) {
               setSelectedDetail(data);
@@ -392,7 +471,34 @@ function App() {
             }
           }).catch(() => {});
       }
-    }).catch((err) => { setError(err.message); setLoading(false); });
+    };
+
+    loadCommits(initialPid).then((list) => {
+      const idx = initialRef
+        ? list.findIndex((c: TimelineCommit) => (c.fullHash || c.hash) === initialRef || c.hash === initialRef.slice(0, 8))
+        : -1;
+
+      if (idx >= 0 && list[idx]) {
+        // Deep link: historical graph instead of current. histIndex set FIRST so the UI locks read-only.
+        const c = list[idx];
+        setHistLoading(true);
+        fetch(`/api/graph?projectId=${initialPid}&ref=${encodeURIComponent(c.fullHash || c.hash)}`)
+          .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+          .then((g: Graph) => {
+            try { applyGraph(g); } catch (e) { console.error('Historical layout failed:', e); }
+            setHistIndex(idx);
+            setLoading(false);
+            fetchGitInfo().then(info => { setGitInfo(info); setGitSyncStatus(info.commitHash ? 'synced' : 'none'); }).catch(() => setGitSyncStatus('error'));
+          })
+          .catch(err => {
+            console.error('Failed to load historical graph (deep link), falling back to current:', err);
+            fetchGraph(initialPid).then(applyCurrentGraph).catch((e: any) => { setError(e.message); setLoading(false); });
+          })
+          .finally(() => setHistLoading(false));
+      } else {
+        fetchGraph(initialPid).then(applyCurrentGraph).catch((err: any) => { setError(err.message); setLoading(false); });
+      }
+    });
   }, []);
 
   // ─── Early returns (AFTER all hooks) ───────────────────
@@ -411,6 +517,49 @@ function App() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', position: 'relative' }}>
+      {/* Commit timeline — bottom-left, aligned with Sync button */}
+      <div style={{
+        position: 'fixed', bottom: '52px', left: '16px', zIndex: 1000,
+        display: 'flex', alignItems: 'center',
+      }}>
+        <Timeline
+          commits={commits}
+          selectedIndex={histIndex}
+          onSelect={handleSelectCommit}
+          onJumpToCurrent={handleBackToCurrent}
+          disabled={histLoading}
+        />
+      </div>
+
+      {/* Historical mode banner */}
+      {histIndex !== null && commits[histIndex] && (
+        <div style={{
+          position: 'fixed', top: '12px', left: '50%', transform: 'translateX(-50%)',
+          zIndex: 1100, display: 'flex', alignItems: 'center', gap: '10px',
+          background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: '6px',
+          padding: '6px 14px', fontSize: '12px', color: '#614700',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+        }}>
+          <span>🕰 История: <b>{commits[histIndex].hash}</b> от {new Date(commits[histIndex].date).toLocaleDateString('ru', { day: 'numeric', month: 'short', year: 'numeric' })} — только просмотр</span>
+          <button
+            onClick={handleBackToCurrent}
+            disabled={histLoading}
+            style={{
+              border: '1px solid #d48806', background: '#fff', borderRadius: '4px',
+              padding: '2px 10px', cursor: 'pointer', fontSize: '11px',
+              color: '#d48806', fontWeight: 'bold', flexShrink: 0,
+            }}
+          >← к текущему</button>
+        </div>
+      )}
+      {histLoading && (
+        <div style={{
+          position: 'fixed', top: '12px', left: '50%', transform: 'translateX(-50%)',
+          zIndex: 1100, background: 'rgba(255,255,255,0.9)', border: '1px solid #d0d0d0',
+          borderRadius: '6px', padding: '6px 14px', fontSize: '12px', color: '#666',
+        }}>⟳ Загрузка состояния…</div>
+      )}
+
       {/* Git commit hash + revert — bottom-left, replaces +Решение */}
       <div style={{
         position: 'fixed', bottom: '16px', left: '90px', zIndex: 1000,
@@ -590,9 +739,12 @@ function App() {
           pendingNewNode={pendingNewNode}
           phaseBands={phaseBands}
           onNodeDoubleClick={() => setDetailAsModal(true)}
-          onNodeDrag={handleNodeDrag} onAddNode={handleAddNode}
-          onDeleteNode={handleDeleteNode} onUpdateNode={handleUpdateNode}
-          onAddConnection={handleAddConnection} onDeleteConnection={handleDeleteConnection}
+          onNodeDrag={histIndex === null ? handleNodeDrag : undefined}
+          onAddNode={histIndex === null ? handleAddNode : undefined}
+          onDeleteNode={histIndex === null ? handleDeleteNode : undefined}
+          onUpdateNode={histIndex === null ? handleUpdateNode : undefined}
+          onAddConnection={histIndex === null ? handleAddConnection : undefined}
+          onDeleteConnection={histIndex === null ? handleDeleteConnection : undefined}
           edgePoints={edgePoints}
           onDeselect={() => setSelectedDetail(null)}
           onNodeClick={handleNodeClick}
@@ -626,9 +778,10 @@ function App() {
           }}
           onBodyChange={(newBody) => setSelectedDetail(prev => prev ? { ...prev, body: newBody } : prev)}
           onClose={() => setSelectedDetail(null)}
-          onDeleteNode={() => {
+          onDeleteNode={histIndex === null ? () => {
             if (selectedDetail) handleDeleteNode(selectedDetail.id);
-          }}
+          } : undefined}
+          readOnly={histIndex !== null}
         />
       )}
       {/* Repo Setup Modal */}
