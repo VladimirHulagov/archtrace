@@ -629,7 +629,21 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                       <button onClick={() => { setSuggestedContent(''); setSuggestedSectionName(null); }} style={{ border: '1px solid #d0d0d0', background: '#fff', color: '#666', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}>Отклонить</button>
                     </div>
                     {(() => {
-                      const lines = suggestedContent.split('\n').map((l: string) => l.trim()).filter((l: string) => l.match(/^[-*]/)).map((l: string) => l.replace(/^[-*]\s+/, '').trim()).filter((l: string) => l.length > 2);
+                      // Parse AI bullet list: strip markdown, keep only the variant NAME
+                      // (cut explanation tail after — / – / :), dedupe.
+                      const cleanName = (raw: string): string => {
+                        let s = raw.replace(/^[-*—–]\s+/, '').replace(/\*\*/g, '').trim();
+                        const m = s.match(/^([^—–:]{2,60})(?:\s*[—–:]\s*.*)?$/);
+                        if (m && m[1].trim()) s = m[1].trim();
+                        return s.replace(/[.,;]+$/, '').trim();
+                      };
+                      const seen = new Set<string>();
+                      const lines = suggestedContent.split('\n')
+                        .map((l: string) => l.trim())
+                        .filter((l: string) => /^[-*—–]\s+/.test(l))
+                        .map((l: string) => cleanName(l))
+                        .filter((l: string) => l.length > 2)
+                        .filter((l: string) => { const k = l.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
                       // Track which AI suggestions have been added
                       const addedTitles = new Set(allOptions.map(o => o.title));
                       return (
@@ -647,8 +661,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                                   onOptionsChange?.();
                                   setSuggestedContent(prev => {
                                     const remaining = prev.split('\n').filter(l => {
-                                      const clean = l.trim().replace(/^[-*]\s+/, '').trim();
-                                      return clean !== title;
+                                      return cleanName(l) !== title;
                                     });
                                     if (remaining.filter(l => l.trim().match(/^[-*]/)).length === 0) {
                                       setSuggestedSectionName(null);
