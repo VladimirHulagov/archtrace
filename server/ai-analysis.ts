@@ -41,7 +41,7 @@ export async function runArchitecturalAnalysis(ctx: AnalysisContext): Promise<An
       { role: 'user', content: prompt },
     ],
     temperature: 0.7,
-    max_tokens: 4000,
+    max_tokens: 8000,
   });
 
   const response = await callZai(requestBody);
@@ -55,18 +55,32 @@ function extractAlternatives(text: string): string[] {
   // Match patterns like "- **Альтернатива:** ..." or "Альтернатива: ..." or lines in an "## Альтернативы" section
   const lines = text.split('\n');
   let inAltSection = false;
+  let sawAltSection = false;
   for (const line of lines) {
     const trimmed = line.trim();
-    if (/^#{1,3}\s*(Альтернативы|Alternatives)/i.test(trimmed)) { inAltSection = true; continue; }
+    if (/^#{1,3}\s*(Альтернативы|Alternatives)/i.test(trimmed)) { inAltSection = true; sawAltSection = true; continue; }
     if (/^#{1,3}\s/.test(trimmed) && inAltSection) { inAltSection = false; }
-    if (inAltSection && /^[-*]\s+/.test(trimmed)) {
-      const clean = trimmed.replace(/^[-*]\s+/, '').replace(/\*\*/g, '').trim();
+    if (inAltSection && /^[-*—–]\s+/.test(trimmed)) {
+      const clean = trimmed.replace(/^[-*—–]\s+/, '').replace(/\*\*/g, '').trim();
       if (clean.length > 5) alts.push(clean);
     }
     // Also match inline "Альтернатива:" prefix
     const altMatch = trimmed.match(/^(?:[-*]?\s*)?\*{0,2}Альтернатива[:\s]*\*{0,2}\s*(.+)/i);
     if (altMatch && altMatch[1].length > 5) {
       alts.push(altMatch[1].trim());
+    }
+  }
+  // Suggest-options responses are usually a plain bullet list without an
+  // "## Альтернативы" header — fall back to parsing top-level bullets.
+  if (!sawAltSection && alts.length === 0) {
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (/^#{1,3}\s/.test(trimmed)) continue; // skip headings
+      const m = trimmed.match(/^[-*—–]\s+(.{6,})$/);
+      if (m) {
+        const clean = m[1].replace(/\*\*/g, '').trim();
+        if (clean.length > 5) alts.push(clean);
+      }
     }
   }
   return [...new Set(alts)].slice(0, 5); // dedupe, max 5
@@ -158,6 +172,9 @@ export async function runSectionSuggestion(params: {
   title: string;
   currentContent: string;
   phase: number;
+  context?: string;
+  parentTitle?: string;
+  parentBody?: string;
 }): Promise<{ content: string; alternatives?: string[] }> {
   const { section, title, currentContent, phase } = params;
 
@@ -172,6 +189,15 @@ export async function runSectionSuggestion(params: {
   if (section === 'options') {
     // OPTIONS: conceptual approaches, not feature combinations
     prompt += `Архитектурное решение: "${title}".\n`;
+    if (params.parentTitle) {
+      prompt += `Родительское требование/задача: "${params.parentTitle}".\n`;
+      if (params.parentBody?.trim()) {
+        prompt += `Контекст требования:\n${params.parentBody.slice(0, 1500)}\n\n`;
+      }
+    }
+    if (params.context?.trim()) {
+      prompt += `Контекст этого решения:\n${params.context.slice(0, 2000)}\n\n`;
+    }
     if (currentContent?.trim()) {
       prompt += `Существующие варианты:\n${currentContent}\n\n`;
     }
@@ -180,11 +206,9 @@ export async function runSectionSuggestion(params: {
     prompt += `- Каждый вариант должен основываться на РАЗНОМ физическом принципе\n`;
     prompt += `- НЕ комбинируй подходы (например, "осмос с углем" — это комбинация)\n`;
     prompt += `- НЕ повторяй уже существующие варианты\n`;
-    prompt += `- Только короткие названия (2-5 слов)\n\n`;
-    prompt += `Пример хороших концептуально разных вариантов:\n`;
-    prompt += `- Обратный осмос\n- Ионообменная фильтрация\n- Дистилляция\n- Ультрафиолетовое обеззараживание\n- Керамическая микрофильтрация\n\n`;
-    prompt += `Пример ПЛОХИХ вариантов (комбинации):\n`;
-    prompt += `- Обратный осмос с минерализатором (комбинация)\n- Угольный фильтр с УФ-лампой (комбинация)\n\n`;
+    prompt += `- Только короткие названия (2-5 слов)\n`;
+    prompt += `- Учитывай МАСШТАБ, БЮДЖЕТ и условия эксплуатации из контекста: варианты должны быть реалистично применимы к описанной ситуации (частный дом ≠ промышленная установка; индивидуальный проект ≠ предприятие)\n`;
+    prompt += `- Если контекст указывает масштаб (число пользователей, бюджет, место) — каждый вариант должен выдерживать проверку этими ограничениями\n\n`;
     prompt += `Формат: каждый вариант с новой строки через тире. Русский язык.`;
   } else if (section === 'context') {
     // CONTEXT: only context, NO options/variants
@@ -218,7 +242,7 @@ export async function runSectionSuggestion(params: {
       { role: 'user', content: prompt },
     ],
     temperature: 0.8,
-    max_tokens: 4000,
+    max_tokens: 8000,
   });
 
   const response = await callZai(requestBody);
@@ -259,7 +283,7 @@ async function callZai(body: string): Promise<string> {
     });
 
     req.on('error', reject);
-    req.setTimeout(60000, () => { req.destroy(); reject(new Error('Z.ai timeout')); });
+    req.setTimeout(120000, () => { req.destroy(); reject(new Error('Z.ai timeout')); });
     req.write(body);
     req.end();
   });

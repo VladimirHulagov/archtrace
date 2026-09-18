@@ -144,6 +144,35 @@ function authGitUrl(url: string): string {
   return url;
 }
 
+// Fetch a fresh fine-grained PAT from the ArchTrace DB (set at login).
+// Falls back to null so callers can use authGitUrl()'s env token instead.
+async function getFreshPat(): Promise<string | null> {
+  try {
+    const { queryOne } = await import('./db.js');
+    const row: any = await queryOne(
+      "SELECT github_token FROM users WHERE role='architect' AND github_token IS NOT NULL ORDER BY id LIMIT 1"
+    );
+    return row?.github_token || null;
+  } catch {
+    return null;
+  }
+}
+
+// Rewire the clone's origin to a fresh-token URL (used when the clone was
+// born with an env token that has since expired; push goes through origin).
+async function healRemoteUrl(projectId: number, repoUrl: string, token: string): Promise<void> {
+  const cloneDir = path.resolve(__dirname, '..', `git-data-${projectId}`);
+  const url = repoUrl.startsWith('https://github.com')
+    ? repoUrl.replace('https://', `https://x-access-token:${token}@`)
+    : repoUrl;
+  try {
+    execSync(`git remote set-url origin "${url}"`,
+      { cwd: cloneDir, stdio: 'pipe', timeout: 10000 });
+  } catch (e: any) {
+    console.warn(`healRemoteUrl p${projectId}: ${e?.message || e}`);
+  }
+}
+
 // Cache of project → decisions dir
 const projectDirCache = new Map<number, string>();
 
@@ -168,23 +197,34 @@ async function projectDecisionsDir(projectId: number, skipSync: boolean = false)
     const repoPath = project.git_path || '.';
 
     try {
+      // A clone created earlier may carry an expired env token in its origin
+      // URL (authGitUrl embeds GITHUB_TOKEN at clone time). Before syncing,
+      // rewire origin to the fresh PAT from the DB so fetch AND push both
+      // work (см. pitfall «git-push триада»).
+      const fresh = await getFreshPat();
       const gitDirExists = fs.existsSync(path.join(cloneDir, '.git'));
       if (!gitDirExists) {
         if (fs.existsSync(cloneDir)) {
           fs.rmSync(cloneDir, { recursive: true, force: true });
         }
-        execSync(`git clone --branch ${branch} "${authGitUrl(project.git_repo_url)}" "${cloneDir}"`,
+        const cloneUrl = fresh && project.git_repo_url.startsWith('https://github.com')
+          ? project.git_repo_url.replace('https://', `https://x-access-token:${fresh}@`)
+          : authGitUrl(project.git_repo_url);
+        execSync(`git clone --branch ${branch} "${cloneUrl}" "${cloneDir}"`,
           { stdio: 'pipe', timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
       } else {
+        if (fresh) await healRemoteUrl(projectId, project.git_repo_url, fresh);
         execSync(`git fetch origin ${branch} `, { cwd: cloneDir, stdio: 'pipe', timeout: 30000 });
         execSync(`git reset --hard origin/${branch}`, { cwd: cloneDir, stdio: 'pipe', timeout: 15000 });
       }
       dir = path.resolve(cloneDir, repoPath);
       if (!fs.existsSync(dir)) {
-        // git_path points to a non-existent subdir — fall back to clone root
-        // instead of ENOENT (e.g. repo created later, path typo)
-        console.warn(`git_path '${repoPath}' not found in clone for project ${projectId}, using clone root`);
-        dir = cloneDir;
+        // git_path is not in the repo yet — materialize an EMPTY subdir.
+        // NEVER fall back to the clone root: for a project sharing a repo
+        // with another project that leaks the other project's ADR cards
+        // (project 9 was showing OCP nodes, found 10.09.2026).
+        fs.mkdirSync(dir, { recursive: true });
+        console.warn(`git_path '${repoPath}' not found in clone for project ${projectId}, created empty subdir`);
       }
     } catch (cloneErr: any) {
       // Clone failed — use empty per-project dir, NOT fallback to project 1
@@ -505,11 +545,20 @@ app.post('/api/decisions/:id/suggest', requireAuth, async (req, res) => {
       : section === 'options' ? sections.options
       : sections.consequences;
 
+    // Parent context — grounds AI suggestions in the actual problem scope
+    const parentNode = node.parent
+      ? graph.nodes.find(n => n.id === node.parent)
+      : undefined;
+    const parentSections = parentNode ? parseBodySections(parentNode.body) : undefined;
+
     const result = await runSectionSuggestion({
       section,
       title: node.title,
       currentContent,
       phase: node.phase || 4,
+      context: sections.context,
+      parentTitle: parentNode?.title,
+      parentBody: parentSections?.context,
     });
 
     res.json(result);
@@ -1031,6 +1080,20 @@ app.post('/api/projects', requireArchitect, async (req, res) => {
       name, description || null,
       git_repo_url, git_branch || 'main', git_path || '.'
     );
+
+    // Seed a fresh per-project clone NOW and materialize git_path inside it,
+    // so the "git_path not found → clone root" fallback in projectDecisionsDir
+    // can never expose another project's cards to a brand-new project.
+    try {
+      if (project) {
+        const seedDir = await projectDecisionsDir(project.id, true);
+        fs.mkdirSync(path.resolve(seedDir, project.git_path || '.'), { recursive: true });
+        projectDirCache.delete(project.id);
+      }
+    } catch (seedErr: any) {
+      console.warn(`post-create seed failed for new project: ${seedErr?.message || seedErr}`);
+    }
+
     res.status(201).json(project);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1157,6 +1220,7 @@ app.post('/api/decisions', requireAuth, async (req, res) => {
     } else {
       res.status(201).json({ id: newId, filename, message: 'saved locally (no git repo)' });
     }
+    invalidateGraphCache(projectId);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -1217,6 +1281,7 @@ app.put('/api/decisions/:id', requireAuth, async (req, res) => {
     } else {
       res.json({ id: node.id, message: 'saved locally (no git repo)' });
     }
+    invalidateGraphCache(projectId);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -1250,6 +1315,7 @@ app.delete('/api/decisions/:id', requireAuth, async (req, res) => {
     } else {
       res.json({ id: node.id, message: 'deleted locally (no git repo)' });
     }
+    invalidateGraphCache(projectId);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
