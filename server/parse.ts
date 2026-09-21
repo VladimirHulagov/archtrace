@@ -285,12 +285,35 @@ function parseOptions(body: string): { letter: string; title: string }[] {
   return options;
 }
 
+/**
+ * Parse requirement items from the '## Требования' section of a requirement
+ * node into option-shaped entries (R1, R2, ...) so tree cards can render them
+ * exactly like decision options (incl. winner-vote strikethrough).
+ */
+function parseRequirementItems(body: string): { letter: string; title: string }[] {
+  const m = body.match(/^##\s+Требования\s*$/m);
+  if (!m) return [];
+  const rest = body.slice(m.index! + m[0].length);
+  const section = rest.split(/^##\s+/m)[0];
+  const items: { letter: string; title: string }[] = [];
+  for (const line of section.split('\n')) {
+    const t = line.trim();
+    const lm = t.match(/^[-*\u2014\u2013]\s+(.+)$/) || t.match(/^\d+[.)]\s+(.+)$/);
+    if (lm) {
+      const title = lm[1].trim();
+      if (title) items.push({ letter: 'R' + (items.length + 1), title });
+    }
+  }
+  return items;
+}
+
 export function parseDecisionFile(filePath: string): DecisionNode | null {
   const raw = fs.readFileSync(filePath, 'utf-8');
   const { frontmatter, body } = parseFrontmatter(raw);
 
   const rawType = frontmatter.type || 'decision';
   const rawPhase = frontmatter.phase;
+  const parsedOptions = parseOptions(body);
   return {
     id: frontmatter.id || path.basename(filePath, '.md'),
     title: frontmatter.title || 'Untitled',
@@ -302,7 +325,9 @@ export function parseDecisionFile(filePath: string): DecisionNode | null {
     created: frontmatter.created || new Date().toISOString().split('T')[0],
     decided: frontmatter.decided ?? null,
     voters: frontmatter.voters || [],
-    options: parseOptions(body),
+    options: parsedOptions.length > 0
+      ? parsedOptions
+      : (rawType === 'requirement' ? parseRequirementItems(body) : []),
     body: body.trim(),
     file: path.basename(filePath),
   };

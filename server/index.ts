@@ -21,7 +21,7 @@ import { runArchitecturalAnalysis, runSectionSuggestion } from './ai-analysis.js
 import { syncRepo, isRepoReady, getActiveDecisionsDir, pushChanges } from './git-sync.js';
 import {
   getComments, addComment, deleteComment, updateComment,
-  getVotes, castVote, removeVote,
+  getVotes, castVote, removeVote, getAllProjectVotes,
   toggleReaction,
   getOrCreateUser, getUserById, getProjects, createProject,
   updateUserGithubToken, getUserGithubToken,
@@ -809,6 +809,28 @@ app.get('/api/graph', async (req, res) => {
     }
     const dir = await projectDecisionsDir(projectId);
     const graph = buildGraph(dir);
+    // Enrich nodes with DB votes so tree cards render live tallies
+    // (winner strikethrough for options AND requirement items R1/R2/...).
+    try {
+      const dbVotes = await getAllProjectVotes(projectId);
+      if (dbVotes.length > 0) {
+        const byNode = new Map<string, { name: string; role: string; vote: string; weight: number; rationale: string }[]>();
+        for (const v of dbVotes) {
+          if (!byNode.has(v.node_id)) byNode.set(v.node_id, []);
+          byNode.get(v.node_id)!.push({
+            name: v.username || String(v.user_id),
+            role: 'member',
+            vote: v.option_letter,
+            weight: v.weight,
+            rationale: v.rationale || '',
+          });
+        }
+        for (const node of graph.nodes) {
+          const vs = byNode.get(node.id);
+          if (vs && vs.length > 0) node.voters = vs;
+        }
+      }
+    } catch (e: any) { console.error('vote enrich failed:', e.message); }
     graphCache.set(projectId, { graph, timestamp: Date.now() });
     res.json(graph);
   } catch (err: any) {

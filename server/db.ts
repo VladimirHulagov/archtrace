@@ -196,6 +196,17 @@ export async function castVote(
   return rows[0];
 }
 
+/** All votes in a project (for graph card rendering: winner strikethrough etc.). */
+export async function getAllProjectVotes(projectId: number): Promise<Vote[]> {
+  return query(
+    `SELECT v.*, u.username
+     FROM votes v
+     JOIN users u ON v.user_id = u.id
+     WHERE v.project_id = $1`,
+    [projectId]
+  );
+}
+
 export async function removeVote(nodeId: string, projectId: number, userId: number, optionLetter?: string): Promise<boolean> {
   let rows;
   if (optionLetter) {
