@@ -346,6 +346,9 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     setShowHistory(false);
   }, [detail.id]);
 
+  // Manual add/delete of list items (requirements, constraints, acceptance, ...)
+  const [addingSection, setAddingSection] = useState<string | null>(null);
+  const [newItemText, setNewItemText] = useState('');
   // Serializes all suggestion applies so rapid clicks can never double-append
   // or overwrite each other: each apply merges from the latest server state.
   const applyQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -376,7 +379,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           if (!latest) latest = ((sectionsRef.current as any)[key] || '').trimEnd();
           // List sections: keep only bullet lines (drops AI preambles), dedupe
           // against what is already stored, then append as "- " bullets.
-          if (section === 'requirements' || section === 'approaches' || section === 'symptoms' || section === 'tradeoffs') {
+          if (section === 'requirements' || section === 'approaches' || section === 'symptoms' || section === 'tradeoffs' || section === 'constraints' || section === 'acceptance' || section === 'relevance') {
             const newLines = content.split('\n')
               .map(l => l.trim())
               .filter(l => /^[-*—–]/.test(l))
@@ -405,7 +408,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   // Optimistic: the row is removed from the suggestion box immediately (so a
   // double-click can't fire twice), and the actual apply is serialized through
   // applyQueueRef — each apply merges from the latest server state.
-  const handleApplyLine = useCallback((section: 'requirements' | 'approaches' | 'symptoms' | 'tradeoffs', line: string) => {
+  const handleApplyLine = useCallback((section: 'requirements' | 'approaches' | 'symptoms' | 'tradeoffs' | 'constraints' | 'acceptance' | 'relevance', line: string) => {
     const cleanLine = line.replace(/\*\*/g, '').trim();
     if (!cleanLine) return;
     // Optimistic removal — the row disappears at once. Match any line whose
@@ -419,7 +422,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     });
     applyQueueRef.current = applyQueueRef.current.then(async () => {
       try {
-        const fieldMap = { requirements: 'requirements', approaches: 'approaches', symptoms: 'symptoms', tradeoffs: 'tradeoffs' } as const;
+        const fieldMap = { requirements: 'requirements', approaches: 'approaches', symptoms: 'symptoms', tradeoffs: 'tradeoffs', constraints: 'constraints', acceptance: 'acceptance', relevance: 'relevance' } as const;
         const field = fieldMap[section];
         // Re-read the node so we merge into the text the server actually has,
         // not a snapshot captured before the previous queued apply.
@@ -442,6 +445,45 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
         setSuggestedContent(prev => (prev ? prev + '\n- ' + cleanLine : '- ' + cleanLine));
         setSuggestedSectionName(prev => prev ?? (section as any));
       }
+    });
+  }, [detail.id, onOptionsChange]);
+
+  // ─── Manual list management: add/remove an item in any list section ──────
+  // Serialized through applyQueueRef; merges from freshest server state.
+  const LIST_FIELDS = { symptoms: 'symptoms', relevance: 'relevance', requirements: 'requirements',
+    constraints: 'constraints', acceptance: 'acceptance', approaches: 'approaches', tradeoffs: 'tradeoffs' } as const;
+
+  const mutateListItem = useCallback((section: keyof typeof LIST_FIELDS, mode: 'add' | 'remove', line: string) => {
+    const field = LIST_FIELDS[section];
+    applyQueueRef.current = applyQueueRef.current.then(async () => {
+      try {
+        let latest = '';
+        try {
+          const res = await authFetch(`/api/decisions/${detail.id}?projectId=${getProjectId()}`);
+          if (res.ok) {
+            const fresh = await res.json();
+            latest = ((parseAdrBody(fresh.body || '') as any)[section] || '').trimEnd();
+          }
+        } catch { /* fall back to local snapshot */ }
+        if (!latest) latest = ((sectionsRef.current as any)[section] || '').trimEnd();
+        const norm = (s: string) => s.replace(/^[-*—–]\s*/, '').replace(/^\d+[.)]\s*/, '').replace(/\*\*/g, '').trim();
+        if (mode === 'add') {
+          const text = line.replace(/\*\*/g, '').trim();
+          if (!text || latest.split('\n').some(l => norm(l) === text)) return;
+          const merged = latest ? latest + '\n- ' + text : '- ' + text;
+          await updateDecision(detail.id, { [field]: merged } as any);
+        } else {
+          const lines = latest.split('\n');
+          const kept = lines.filter(l => norm(l) !== line);
+          if (kept.length === lines.length) return; // nothing matched
+          await updateDecision(detail.id, { [field]: kept.join('\n') } as any);
+          // Retract this user's vote on the removed position (letters shift after removal).
+          const items = parseListItems(latest);
+          const removedIdx = items.findIndex(it => norm(it) === line);
+          if (removedIdx >= 0) { try { await removeVoteApi(detail.id, undefined, reqLetter(removedIdx)); } catch { /* ignore */ } }
+        }
+        if (onOptionsChange) onOptionsChange();
+      } catch (err) { console.error('List item ' + mode + ' error:', err); }
     });
   }, [detail.id, onOptionsChange]);
 
@@ -666,7 +708,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             .map(cfg => {
               const content = (sections as any)[cfg.key] as string;
               const suggestKey = cfg.key as any;
-              const isListSection = cfg.key === 'requirements' || cfg.key === 'approaches';
+              const isListSection = ['requirements', 'approaches', 'symptoms', 'tradeoffs', 'constraints', 'acceptance', 'relevance'].includes(cfg.key);
               const items = isListSection ? parseListItems(content || '') : [];
               return (
                 <Section key={cfg.key} title={cfg.title} accent={cfg.accent}
@@ -683,24 +725,56 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                     isListSection ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         {items.map((item, i) => {
+                          const votable = cfg.key === 'requirements' || cfg.key === 'approaches';
                           const letter = reqLetter(i);
                           const w = voteTally[letter] || 0;
                           const isVoted = userVote?.option_letter === letter;
                           return (
                             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 6px', borderRadius: '4px', border: `1px solid ${isVoted ? '#52c41a' : '#e0e0e0'}`, background: isVoted ? '#f6ffed' : '#fff' }}>
-                              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '26px', height: '20px', borderRadius: '3px', background: cfg.accent, color: '#fff', fontWeight: 'bold', fontSize: '10px', padding: '0 3px' }}>{letter}</span>
+                              {votable && <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '26px', height: '20px', borderRadius: '3px', background: cfg.accent, color: '#fff', fontWeight: 'bold', fontSize: '10px', padding: '0 3px' }}>{letter}</span>}
                               <span style={{ flex: 1, fontSize: '12px', color: '#333' }}>{item}</span>
-                              {w > 0 && <span style={{ padding: '1px 6px', borderRadius: '8px', background: '#52c41a20', color: '#389e0d', fontSize: '10px', fontWeight: 'bold' }}>{w}</span>}
-                              {!readOnly && (
+                              {votable && w > 0 && <span style={{ padding: '1px 6px', borderRadius: '8px', background: '#52c41a20', color: '#389e0d', fontSize: '10px', fontWeight: 'bold' }}>{w}</span>}
+                              {votable && !readOnly && (
                                 <button onClick={() => castTypeVote(letter)}
                                   title="Голосовать за этот пункт"
                                   style={{ border: '1px solid #52c41a', background: isVoted ? '#52c41a' : '#f6ffed', color: isVoted ? '#fff' : '#389e0d', borderRadius: '3px', padding: '2px 8px', fontSize: '10px', cursor: 'pointer', flexShrink: 0 }}>
                                   {isVoted ? '✓' : '+'}
                                 </button>
                               )}
+                              {!readOnly && (
+                                <button onClick={() => mutateListItem(cfg.key as any, 'remove', item)}
+                                  title="Удалить пункт"
+                                  style={{ border: '1px solid #ffccc7', background: '#fff', color: '#ff4d4f', borderRadius: '3px', padding: '2px 6px', fontSize: '10px', cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>×</button>
+                              )}
                             </div>
                           );
                         })}
+                        {!readOnly && addingSection === suggestKey && (
+                          <div style={{ display: 'flex', gap: '4px', marginTop: '2px' }}>
+                            <input
+                              autoFocus
+                              value={newItemText}
+                              onChange={e => setNewItemText(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter' && newItemText.trim()) { mutateListItem(suggestKey as any, 'add', newItemText); setNewItemText(''); setAddingSection(null); }
+                                if (e.key === 'Escape') setAddingSection(null);
+                              }}
+                              placeholder="Новый пункт…"
+                              style={{ flex: 1, fontSize: '12px', padding: '4px 8px', borderRadius: '3px', border: '1px solid #d0d0d0' }}
+                            />
+                            <button
+                              onClick={() => { if (!newItemText.trim()) return; mutateListItem(suggestKey as any, 'add', newItemText); setNewItemText(''); setAddingSection(null); }}
+                              disabled={!newItemText.trim()}
+                              style={{ border: '1px solid #52c41a', background: '#f6ffed', color: '#389e0d', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}
+                            >＋</button>
+                          </div>
+                        )}
+                        {!readOnly && addingSection !== suggestKey && (
+                          <button
+                            onClick={() => { setAddingSection(suggestKey); setNewItemText(''); }}
+                            style={{ alignSelf: 'flex-start', marginTop: '2px', border: '1px dashed #bbb', background: 'none', color: '#888', borderRadius: '3px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}
+                          >+ Добавить пункт</button>
+                        )}
                       </div>
                     ) : (
                       <div style={{ fontSize: '13px', lineHeight: 1.6, color: '#333' }}>
@@ -709,6 +783,32 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                     )
                   ) : (
                     <div style={{ fontSize: '12px', color: '#999', fontStyle: 'italic' }}>Пусто — нажми 🪄 для генерации</div>
+                  )}
+                  {isListSection && !content && !readOnly && addingSection !== suggestKey && (
+                    <button
+                      onClick={() => { setAddingSection(suggestKey); setNewItemText(''); }}
+                      style={{ marginTop: '4px', border: '1px dashed #bbb', background: 'none', color: '#888', borderRadius: '3px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer' }}
+                    >+ Добавить пункт</button>
+                  )}
+                  {isListSection && !content && !readOnly && addingSection === suggestKey && (
+                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+                      <input
+                        autoFocus
+                        value={newItemText}
+                        onChange={e => setNewItemText(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && newItemText.trim()) { mutateListItem(suggestKey as any, 'add', newItemText); setNewItemText(''); setAddingSection(null); }
+                          if (e.key === 'Escape') setAddingSection(null);
+                        }}
+                        placeholder="Новый пункт…"
+                        style={{ flex: 1, fontSize: '12px', padding: '4px 8px', borderRadius: '3px', border: '1px solid #d0d0d0' }}
+                      />
+                      <button
+                        onClick={() => { if (!newItemText.trim()) return; mutateListItem(suggestKey as any, 'add', newItemText); setNewItemText(''); setAddingSection(null); }}
+                        disabled={!newItemText.trim()}
+                        style={{ border: '1px solid #52c41a', background: '#f6ffed', color: '#389e0d', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}
+                      >＋</button>
+                    </div>
                   )}
 
                   {/* AI suggestion box for this section */}

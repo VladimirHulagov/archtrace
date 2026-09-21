@@ -203,7 +203,7 @@ export async function runSectionSuggestion(params: {
     prompt += `Проблема: "${title}".\n\n`;
     prompt += ctxBlock();
     if (currentContent?.trim()) {
-      prompt += `Уже есть:\n${currentContent}\n\nНапиши ТОЛЬКО новые дополнения. Не повторяй написанное.\n\n`;
+      prompt += `Уже есть:\n${currentContent}\n\nВАЖНО: существующие пункты (включая добавленные вручную) УЖЕ учтены — пиши ТОЛЬКО новые дополнения, не повторяй и не перефразируй существующее.\n\n`;
     }
     prompt += `Задача — помочь ОСОЗНАТЬ актуальность проблемы:\n`;
     prompt += `- Какие факты/симптомы подтверждают, что проблема реальна и сейчас болезненна?\n`;
@@ -218,7 +218,7 @@ export async function runSectionSuggestion(params: {
     prompt += `Требование/набор требований: "${title}".\n\n`;
     prompt += ctxBlock();
     if (currentContent?.trim()) {
-      prompt += `Уже сформулированные требования:\n${currentContent}\n\n`;
+      prompt += `Уже сформулированные требования (включая добавленные вручную) — учтены, НЕ повторяй и не перефразируй их:\n${currentContent}\n\n`;
     }
     prompt += `Сформулируй 4-6 ДОПОЛНИТЕЛЬНЫХ проверяемых требований, вытекающих из проблемы и контекста.\n\n`;
     prompt += `ВАЖНО:\n`;
@@ -237,7 +237,7 @@ export async function runSectionSuggestion(params: {
     prompt += `Концептуальный вопрос: "${title}".\n\n`;
     prompt += ctxBlock();
     if (currentContent?.trim()) {
-      prompt += `Уже рассмотренные подходы:\n${currentContent}\n\n`;
+      prompt += `Уже рассмотренные подходы (включая добавленные вручную) — учтены, НЕ повторяй и не перефразируй их:\n${currentContent}\n\n`;
     }
     prompt += `Предложи 3-5 КОНЦЕПТУАЛЬНЫХ ПОДХОДОВ, каждый из которых удовлетворяет требованиям родителя с учётом ограничений.\n\n`;
     prompt += `ВАЖНО:\n`;
@@ -262,7 +262,7 @@ export async function runSectionSuggestion(params: {
       prompt += `Контекст этого решения:\n${params.context.slice(0, 2000)}\n\n`;
     }
     if (currentContent?.trim()) {
-      prompt += `Существующие варианты:\n${currentContent}\n\n`;
+      prompt += `Существующие варианты (включая добавленные вручную) — учтены, НЕ повторяй и не перефразируй их:\n${currentContent}\n\n`;
     }
     prompt += `Предложи 4-6 КОНЦЕПТУАЛЬНО РАЗНЫХ подходов к решению. Каждый подход — это отдельный физический принцип или технология, а НЕ комбинация элементов.\n\n`;
     prompt += `ВАЖНО:\n`;
@@ -277,7 +277,7 @@ export async function runSectionSuggestion(params: {
     // CONTEXT: only context, NO options/variants
     prompt += `Архитектурное решение: "${title}". Секция: контекст.\n`;
     if (currentContent?.trim()) {
-      prompt += `Существующий текст:\n${currentContent}\n\n`;
+      prompt += `Существующий текст (включая добавленное вручную) — учтён, НЕ повторяй и не перефразируй его:\n${currentContent}\n\n`;
       prompt += `Напиши ТОЛЬКО новые дополнения к контексту. Не повторяй уже написанное.\n`;
     } else {
       prompt += `Напиши контекст архитектурного решения.\n`;
@@ -289,7 +289,7 @@ export async function runSectionSuggestion(params: {
     // CONSEQUENCES
     prompt += `Архитектурное решение: "${title}". Секция: последствия.\n`;
     if (currentContent?.trim()) {
-      prompt += `Существующий текст:\n${currentContent}\n\n`;
+      prompt += `Существующий текст (включая добавленное вручную) — учтён, НЕ повторяй и не перефразируй его:\n${currentContent}\n\n`;
       prompt += `Напиши ТОЛЬКО новые дополнения о последствиях. Не повторяй уже написанное.\n`;
     } else {
       prompt += `Напиши последствия архитектурного решения.\n`;
