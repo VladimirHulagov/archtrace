@@ -180,12 +180,12 @@ export async function castVote(
   weight: number,
   rationale: string | null = null
 ): Promise<Vote> {
-  // UPSERT: one vote per user per node
+  // UPSERT: one vote per user per node per option (multi-vote migration)
   const rows = await query(
     `INSERT INTO votes (node_id, project_id, user_id, option_letter, weight, rationale)
      VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (node_id, project_id, user_id)
-     DO UPDATE SET option_letter = $4, weight = $5, rationale = $6, updated_at = NOW()
+     ON CONFLICT (node_id, project_id, user_id, option_letter)
+     DO UPDATE SET weight = $5, rationale = $6, updated_at = NOW()
      RETURNING *`,
     [nodeId, projectId, userId, optionLetter, weight, rationale]
   );
@@ -196,11 +196,19 @@ export async function castVote(
   return rows[0];
 }
 
-export async function removeVote(nodeId: string, projectId: number, userId: number): Promise<boolean> {
-  const rows = await query(
-    'DELETE FROM votes WHERE node_id = $1 AND project_id = $2 AND user_id = $3 RETURNING id',
-    [nodeId, projectId, userId]
-  );
+export async function removeVote(nodeId: string, projectId: number, userId: number, optionLetter?: string): Promise<boolean> {
+  let rows;
+  if (optionLetter) {
+    rows = await query(
+      'DELETE FROM votes WHERE node_id = $1 AND project_id = $2 AND user_id = $3 AND option_letter = $4 RETURNING id',
+      [nodeId, projectId, userId, optionLetter]
+    );
+  } else {
+    rows = await query(
+      'DELETE FROM votes WHERE node_id = $1 AND project_id = $2 AND user_id = $3 RETURNING id',
+      [nodeId, projectId, userId]
+    );
+  }
   return rows.length > 0;
 }
 

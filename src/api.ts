@@ -207,8 +207,9 @@ export async function castVoteApi(nodeId: string, optionLetter: string, weight: 
   return res.json();
 }
 
-export async function removeVoteApi(nodeId: string, userId?: number): Promise<void> {
-  await authFetch(`${API_BASE}/votes/${nodeId}`, { method: 'DELETE', headers: projectHeaders() });
+export async function removeVoteApi(nodeId: string, userId?: number, optionLetter?: string): Promise<void> {
+  const q = optionLetter ? `?optionLetter=${encodeURIComponent(optionLetter)}` : '';
+  await authFetch(`${API_BASE}/votes/${nodeId}${q}`, { method: 'DELETE', headers: projectHeaders() });
 }
 
 // Options now live in the MD file — fetch from same endpoint
@@ -278,6 +279,7 @@ export async function deleteProjectApi(id: number): Promise<void> {
 // Current project ID — updated when user switches project
 let _currentProjectId = 1;
 export function setProjectId(id: number) { _currentProjectId = id; }
+export function getProjectId(): number { return _currentProjectId; }
 
 
 function projectHeaders(): Record<string, string> {
@@ -340,6 +342,13 @@ export interface AdrInput {
   options?: { letter: string; title: string; description?: string }[];
   decision?: string;
   consequences?: string;
+  symptoms?: string;
+  relevance?: string;
+  requirements?: string;
+  constraints?: string;
+  acceptance?: string;
+  approaches?: string;
+  tradeoffs?: string;
 }
 
 export async function createDecision(data: AdrInput): Promise<{ id: string; filename: string; message: string }> {
@@ -388,7 +397,9 @@ export async function revertGit(): Promise<{ success: boolean; message: string; 
 
 // ─── AI Analysis ──────────────────────────────────────────
 
-export async function suggestSection(nodeId: string, section: 'context' | 'options' | 'consequences'): Promise<{ content: string; alternatives?: string[] }> {
+export type SuggestSection = 'context' | 'options' | 'consequences' | 'symptoms' | 'relevance' | 'requirements' | 'constraints' | 'acceptance' | 'approaches' | 'tradeoffs';
+
+export async function suggestSection(nodeId: string, section: SuggestSection): Promise<{ content: string; alternatives?: string[] }> {
   const res = await authFetch(`${API_BASE}/decisions/${nodeId}/suggest`, {
     method: 'POST',
     headers: jsonHeaders(),

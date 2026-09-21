@@ -530,7 +530,8 @@ app.post('/api/git-revert', requireArchitect, async (req, res) => {
 app.post('/api/decisions/:id/suggest', requireAuth, async (req, res) => {
   try {
     const { section } = req.body;
-    if (!section || !['context', 'options', 'consequences'].includes(section)) {
+    const VALID_SECTIONS = ['context', 'options', 'consequences', 'symptoms', 'relevance', 'requirements', 'constraints', 'acceptance', 'approaches', 'tradeoffs'];
+    if (!section || !VALID_SECTIONS.includes(section)) {
       return res.status(400).json({ error: 'Invalid section' });
     }
 
@@ -541,15 +542,29 @@ app.post('/api/decisions/:id/suggest', requireAuth, async (req, res) => {
     if (!node) return res.status(404).json({ error: 'Decision not found' });
 
     const sections = parseBodySections(node.body);
-    const currentContent = section === 'context' ? sections.context
-      : section === 'options' ? sections.options
-      : sections.consequences;
+    const sectionContentMap: Record<string, string> = {
+      context: sections.context, options: sections.options, consequences: sections.consequences,
+      symptoms: sections.symptoms, relevance: sections.relevance, requirements: sections.requirements,
+      constraints: sections.constraints, acceptance: sections.acceptance,
+      approaches: sections.approaches, tradeoffs: sections.tradeoffs,
+    };
+    const currentContent = sectionContentMap[section] || '';
 
-    // Parent context — grounds AI suggestions in the actual problem scope
+    // Parent context — grounds AI suggestions in the actual problem scope.
+    // What we pass depends on the CHILD's type:
+    //   requirement ← problem's symptoms/relevance (turn pain into requirements)
+    //   paradigm    ← requirement's requirements/constraints (derive approaches)
+    //   decision    ← parent context as before
     const parentNode = node.parent
       ? graph.nodes.find(n => n.id === node.parent)
       : undefined;
     const parentSections = parentNode ? parseBodySections(parentNode.body) : undefined;
+    let parentContext = parentSections?.context || '';
+    if (parentNode?.type === 'problem' && parentSections) {
+      parentContext = [parentContext, parentSections.symptoms && `Симптомы:\n${parentSections.symptoms}`, parentSections.relevance && `Критерии актуальности:\n${parentSections.relevance}`].filter(Boolean).join('\n\n');
+    } else if (parentNode?.type === 'requirement' && parentSections) {
+      parentContext = [parentContext, parentSections.requirements && `Требования:\n${parentSections.requirements}`, parentSections.constraints && `Ограничения:\n${parentSections.constraints}`].filter(Boolean).join('\n\n');
+    }
 
     const result = await runSectionSuggestion({
       section,
@@ -558,7 +573,8 @@ app.post('/api/decisions/:id/suggest', requireAuth, async (req, res) => {
       phase: node.phase || 4,
       context: sections.context,
       parentTitle: parentNode?.title,
-      parentBody: parentSections?.context,
+      parentBody: parentContext,
+      nodeType: node.type,
     });
 
     res.json(result);
@@ -984,7 +1000,8 @@ app.post('/api/votes/:nodeId', requireAuth, async (req, res) => {
 app.delete('/api/votes/:nodeId', requireAuth, async (req, res) => {
   try {
     const userId = (req as any).authUser.id;
-    const removed = await removeVote(req.params.nodeId, getProjectId(req), userId);
+    const optionLetter = (req.query.optionLetter as string) || undefined;
+    const removed = await removeVote(req.params.nodeId, getProjectId(req), userId, optionLetter);
     if (!removed) return res.status(404).json({ error: 'Vote not found' });
     invalidateGraphCache(getProjectId(req));
     res.status(204).end();
@@ -1226,6 +1243,42 @@ app.post('/api/decisions', requireAuth, async (req, res) => {
   }
 });
 
+// ─── Background git push queue ────────────────────────────
+// Serializes pushes per project so rapid edits never race on git index.lock,
+// and PUT /api/decisions responses don't block on GitHub round-trips
+// (previously every text edit waited for commit+push before responding).
+const pushQueues = new Map<number, { running: boolean; pending: string | null }>();
+
+function queueGitPush(projectId: number, cloneDir: string, message: string): void {
+  let q = pushQueues.get(projectId);
+  if (!q) { q = { running: false, pending: null }; pushQueues.set(projectId, q); }
+  if (q.running) { q.pending = message; return; } // coalesce while a push is in flight
+  q.running = true;
+  runQueuedPush(projectId, cloneDir, message);
+}
+
+function runQueuedPush(projectId: number, cloneDir: string, message: string): void {
+  setImmediate(() => {
+    try {
+      const result = pushChanges(message, loadConfig(), cloneDir);
+      if (!result.success) console.warn(`[git-push] project ${projectId}: ${result.message}`);
+    } catch (err: any) {
+      console.warn(`[git-push] project ${projectId} failed: ${err?.message}`);
+    } finally {
+      const q = pushQueues.get(projectId);
+      if (q && q.running) {
+        q.running = false;
+        if (q.pending) {
+          const next = q.pending;
+          q.pending = null;
+          q.running = true;
+          runQueuedPush(projectId, cloneDir, next);
+        }
+      }
+    }
+  });
+}
+
 /**
  * PUT /api/decisions/:id
  * Edit an existing ADR. Updates the .md file, commits + pushes.
@@ -1265,6 +1318,14 @@ app.put('/api/decisions/:id', requireAuth, async (req, res) => {
       options: optionsForGen,
       decision: req.body.decision !== undefined ? req.body.decision : existing.decision,
       consequences: req.body.consequences !== undefined ? req.body.consequences : existing.consequences,
+      symptoms: req.body.symptoms !== undefined ? req.body.symptoms : existing.symptoms,
+      relevance: req.body.relevance !== undefined ? req.body.relevance : existing.relevance,
+      requirements: req.body.requirements !== undefined ? req.body.requirements : existing.requirements,
+      constraints: req.body.constraints !== undefined ? req.body.constraints : existing.constraints,
+      acceptance: req.body.acceptance !== undefined ? req.body.acceptance : existing.acceptance,
+      approaches: req.body.approaches !== undefined ? req.body.approaches : existing.approaches,
+      tradeoffs: req.body.tradeoffs !== undefined ? req.body.tradeoffs : existing.tradeoffs,
+      legacy: existing.legacy,
       created: node.created,
     });
 
@@ -1272,12 +1333,11 @@ app.put('/api/decisions/:id', requireAuth, async (req, res) => {
 
     if (project?.git_repo_url) {
       const cloneDir = path.resolve(__dirname, '..', `git-data-${projectId}`);
-      const pushResult = pushChanges(`Edit ADR-${node.id}: ${req.body.title || node.title}`, loadConfig(), cloneDir);
-      res.json({
-        id: node.id,
-        pushResult: pushResult.success ? 'pushed' : 'saved locally',
-        message: pushResult.message,
-      });
+      const message = `Edit ADR-${node.id}: ${req.body.title || node.title}`;
+      // The file is saved — respond immediately; git push goes to a background
+      // queue so the UI doesn't block for seconds on the GitHub round-trip.
+      res.json({ id: node.id, pushResult: 'queued', message: 'saved; push in background' });
+      queueGitPush(projectId, cloneDir, message);
     } else {
       res.json({ id: node.id, message: 'saved locally (no git repo)' });
     }

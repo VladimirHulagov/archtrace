@@ -5,11 +5,12 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
-import type { DecisionNode, Comment, Vote } from './api';
+import type { DecisionNode, Comment, Vote, AdrInput } from './api';
 import {
   postComment, deleteCommentApi, castVoteApi, removeVoteApi, addCustomOptionApi, updateCustomOptionApi,
   updateCommentApi,
   updateDecision,
+  getProjectId,
   startAnalysis, getAnalysisStatus, suggestSection,
   reactToComment,
   fetchHistory,
@@ -78,7 +79,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const [editingCommentText, setEditingCommentText] = useState('');
   const [suggestingSection, setSuggestingSection] = useState<string | null>(null);
   const [suggestedContent, setSuggestedContent] = useState<string>('');
-  const [suggestedSectionName, setSuggestedSectionName] = useState<'context' | 'options' | 'consequences' | null>(null);
+  const [suggestedSectionName, setSuggestedSectionName] = useState<string | null>(null);
   const [suggestError, setSuggestError] = useState('');
 
   // ─── Resize logic ───────────────────────────────────────
@@ -108,6 +109,10 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
   // ─── Parse body sections ────────────────────────────────
   const sections = parseAdrBody(detail.body);
+  // Latest parsed sections in a ref — queued background applies always read
+  // the freshest state without re-creating callbacks.
+  const sectionsRef = useRef(sections);
+  sectionsRef.current = sections;
 
   // ─── Compute vote data ──────────────────────────────────
   const allOptions = useMemo(() => [...(detail.options || [])].sort((a, b) => a.letter.localeCompare(b.letter)), [detail.options]);
@@ -116,6 +121,38 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const voteTally: Record<string, number> = {};
   for (const v of votes) { voteTally[v.option_letter] = (voteTally[v.option_letter] || 0) + v.weight; }
   const sortedTally = Object.entries(voteTally).sort(([, a], [, b]) => b - a);
+
+  // ─── Type-driven workflow data ──────────────────────────
+  const nodeType = (detail.type || 'decision') as string;
+  const isProblem = nodeType === 'problem';
+  const isRequirement = nodeType === 'requirement';
+  const isParadigm = nodeType === 'paradigm';
+
+  // Problem relevance votes: '+' = актуальна, '-' = не актуальна
+  const relYes = votes.filter(v => v.option_letter === '+');
+  const relNo = votes.filter(v => v.option_letter === '-');
+  const relYesW = relYes.reduce((s, v) => s + v.weight, 0);
+  const relNoW = relNo.reduce((s, v) => s + v.weight, 0);
+  const myRelVote = userVote?.option_letter === '+' || userVote?.option_letter === '-' ? userVote.option_letter : null;
+
+  // Requirement items with per-item votes (optionLetter = 'R1', 'R2', ...)
+  const requirementItems = useMemo(() => parseListItems(sections.requirements), [sections.requirements]);
+  const paradigmItems = useMemo(() => parseListItems(sections.approaches), [sections.approaches]);
+  const reqLetter = (i: number): string => `R${i + 1}`;
+
+  const castTypeVote = useCallback(async (letter: string) => {
+    try {
+      const w = currentRole === 'architect' ? 3 : currentRole === 'senior' ? 2 : 1;
+      // Toggle: same letter again = retract that vote (multi-vote schema)
+      if (userVote?.option_letter === letter) {
+        await removeVoteApi(detail.id, undefined, letter);
+        onVotesChange(votes.filter(v => !(v.user_id === currentUserId && v.option_letter === letter)));
+        return;
+      }
+      const v = await castVoteApi(detail.id, letter, w);
+      onVotesChange([...votes.filter(x => !(x.user_id === v.user_id && x.option_letter === v.option_letter)), v]);
+    } catch (err) { console.error('Type vote error:', err); }
+  }, [detail, votes, onVotesChange, currentRole, userVote, currentUserId]);
 
   // ─── Sorted comments ────────────────────────────────────
   const sortedComments = useMemo(() => {
@@ -140,12 +177,14 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     } catch (err) { console.error('Vote error:', err); }
   }, [selectedOption, detail, votes, onVotesChange]);
 
-  const handleRemoveVote = useCallback(async () => {
+  const handleRemoveVote = useCallback(async (letter?: string) => {
     try {
-      await removeVoteApi(detail.id);
-      onVotesChange(votes.filter(v => v.user_id !== currentUserId));
+      await removeVoteApi(detail.id, undefined, letter);
+      onVotesChange(letter
+        ? votes.filter(v => !(v.user_id === currentUserId && v.option_letter === letter))
+        : votes.filter(v => v.user_id !== currentUserId));
     } catch (err) { console.error('Remove vote error:', err); }
-  }, [detail, votes, onVotesChange]);
+  }, [detail, votes, onVotesChange, currentUserId]);
 
   const handlePostComment = useCallback(async () => {
     if (!commentText.trim()) return;
@@ -208,7 +247,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   }, [editingOptionTitle, detail, onOptionsChange]);
 
   // ─── Section AI suggestion handler ──────────────────────
-  const handleSuggest = useCallback(async (section: 'context' | 'options' | 'consequences') => {
+  const handleSuggest = useCallback(async (section: 'context' | 'options' | 'consequences' | 'symptoms' | 'relevance' | 'requirements' | 'constraints' | 'acceptance' | 'approaches' | 'tradeoffs') => {
     setSuggestingSection(section);
     setSuggestedContent('');
     setSuggestError('');
@@ -307,19 +346,104 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     setShowHistory(false);
   }, [detail.id]);
 
-  const handleApplySuggestion = useCallback(async (section: 'context' | 'options' | 'consequences') => {
-    if (!suggestedContent) return;
-    try {
-      if (section === 'context') {
-        const existing = sections.context || '';
-        const merged = existing ? existing + '\n\n' + suggestedContent : suggestedContent;
-        await updateDecision(detail.id, { context: merged });
-        if (onOptionsChange) onOptionsChange();
+  // Serializes all suggestion applies so rapid clicks can never double-append
+  // or overwrite each other: each apply merges from the latest server state.
+  const applyQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const handleApplySuggestion = useCallback((section: 'context' | 'options' | 'consequences' | 'symptoms' | 'relevance' | 'requirements' | 'constraints' | 'acceptance' | 'approaches' | 'tradeoffs') => {
+    const content = suggestedContent;
+    if (!content) return;
+    // Optimistic: close the box immediately so a second click can't duplicate.
+    setSuggestedContent('');
+    setSuggestedSectionName(null);
+    applyQueueRef.current = applyQueueRef.current.then(async () => {
+      try {
+        const fieldMap: Record<string, keyof AdrInput> = {
+          symptoms: 'symptoms', relevance: 'relevance', requirements: 'requirements',
+          constraints: 'constraints', acceptance: 'acceptance', approaches: 'approaches', tradeoffs: 'tradeoffs',
+        };
+        const key = section === 'context' ? 'context' : fieldMap[section];
+        if (key) {
+          // Re-read the node so we merge into the text the server actually has.
+          let latest = '';
+          try {
+            const res = await authFetch(`/api/decisions/${detail.id}?projectId=${getProjectId()}`);
+            if (res.ok) {
+              const fresh = await res.json();
+              latest = ((parseAdrBody(fresh.body || '') as any)[key] || '').trimEnd();
+            }
+          } catch { /* fall back to local snapshot */ }
+          if (!latest) latest = ((sectionsRef.current as any)[key] || '').trimEnd();
+          // List sections: keep only bullet lines (drops AI preambles), dedupe
+          // against what is already stored, then append as "- " bullets.
+          if (section === 'requirements' || section === 'approaches' || section === 'symptoms' || section === 'tradeoffs') {
+            const newLines = content.split('\n')
+              .map(l => l.trim())
+              .filter(l => /^[-*—–]/.test(l))
+              .map(l => l.replace(/^[-*—–]\s*/, '').replace(/\*\*/g, '').trim())
+              .filter(l => l && !latest.includes(l));
+            if (newLines.length) {
+              const merged = (latest ? latest.trimEnd() + '\n' : '') + newLines.map(l => '- ' + l).join('\n');
+              await updateDecision(detail.id, { [key]: merged } as any);
+            }
+          } else if (!latest.includes(content)) {
+            const merged = latest ? latest + '\n\n' + content : content;
+            await updateDecision(detail.id, { [key]: merged } as any);
+          }
+          if (onOptionsChange) onOptionsChange();
+        }
+      } catch (err) {
+        console.error('Apply suggestion error:', err);
+        // Restore so the user can retry.
+        setSuggestedContent(prev => (prev ? prev + '\n\n' + content : content));
+        setSuggestedSectionName(prev => prev ?? (section as any));
       }
-      setSuggestedContent('');
-      setSuggestedSectionName(null);
-    } catch (err) { console.error('Apply suggestion error:', err); }
-  }, [suggestedContent, detail.id, sections, onOptionsChange]);
+    });
+  }, [suggestedContent, detail.id, onOptionsChange]);
+
+  // Append a single AI-generated line (requirement/approach) to its section.
+  // Optimistic: the row is removed from the suggestion box immediately (so a
+  // double-click can't fire twice), and the actual apply is serialized through
+  // applyQueueRef — each apply merges from the latest server state.
+  const handleApplyLine = useCallback((section: 'requirements' | 'approaches' | 'symptoms' | 'tradeoffs', line: string) => {
+    const cleanLine = line.replace(/\*\*/g, '').trim();
+    if (!cleanLine) return;
+    // Optimistic removal — the row disappears at once. Match any line whose
+    // stripped form equals the row text (rows are rendered via parseListItems,
+    // which strips bullet/number prefixes), so the clicked row always matches.
+    const norm = (s: string) => s.replace(/^[-*—–]\s*/, '').replace(/^\d+[.)]\s*/, '').replace(/\*\*/g, '').trim();
+    setSuggestedContent(prev => {
+      const remaining = prev.split('\n').filter(l => !norm(l) || norm(l) !== cleanLine);
+      if (remaining.filter(l => l.trim().match(/^[-*—–]/)).length === 0) { setSuggestedSectionName(null); return ''; }
+      return remaining.join('\n');
+    });
+    applyQueueRef.current = applyQueueRef.current.then(async () => {
+      try {
+        const fieldMap = { requirements: 'requirements', approaches: 'approaches', symptoms: 'symptoms', tradeoffs: 'tradeoffs' } as const;
+        const field = fieldMap[section];
+        // Re-read the node so we merge into the text the server actually has,
+        // not a snapshot captured before the previous queued apply.
+        let latest = '';
+        try {
+          const res = await authFetch(`/api/decisions/${detail.id}?projectId=${getProjectId()}`);
+          if (res.ok) {
+            const fresh = await res.json();
+            latest = ((parseAdrBody(fresh.body || '') as any)[section] || '').trimEnd();
+          }
+        } catch { /* fall back to local snapshot */ }
+        if (!latest) latest = ((sectionsRef.current as any)[section] || '').trimEnd();
+        if (latest.includes(cleanLine)) return; // already there — nothing to add
+        const merged = latest ? latest + '\n- ' + cleanLine : '- ' + cleanLine;
+        await updateDecision(detail.id, { [field]: merged } as any);
+        if (onOptionsChange) onOptionsChange();
+      } catch (err) {
+        console.error('Apply line error:', err);
+        // Restore the line so the user can retry.
+        setSuggestedContent(prev => (prev ? prev + '\n- ' + cleanLine : '- ' + cleanLine));
+        setSuggestedSectionName(prev => prev ?? (section as any));
+      }
+    });
+  }, [detail.id, onOptionsChange]);
 
   const handleSaveContext = useCallback(async () => {
     try {
@@ -536,7 +660,127 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             )}
           </Section>
 
-          {/* ОПЦИИ */}
+          {/* ТИПОВЫЕ СЕКЦИИ (problem/requirement/paradigm) */}
+          {(isProblem || isRequirement || isParadigm) && TYPE_SECTIONS[nodeType]
+            .filter(s => s.key !== 'context')
+            .map(cfg => {
+              const content = (sections as any)[cfg.key] as string;
+              const suggestKey = cfg.key as any;
+              const isListSection = cfg.key === 'requirements' || cfg.key === 'approaches';
+              const items = isListSection ? parseListItems(content || '') : [];
+              return (
+                <Section key={cfg.key} title={cfg.title} accent={cfg.accent}
+                  extra={readOnly ? undefined : (
+                    <button
+                      onClick={() => handleSuggest(suggestKey)}
+                      disabled={suggestingSection === suggestKey}
+                      title={`AI: дополнить «${cfg.title}»`}
+                      style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '14px', padding: '0 2px', opacity: suggestingSection === suggestKey ? 0.5 : 0.6 }}
+                    >{suggestingSection === suggestKey ? '⏳' : '🪄'}</button>
+                  )}
+                >
+                  {content ? (
+                    isListSection ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {items.map((item, i) => {
+                          const letter = reqLetter(i);
+                          const w = voteTally[letter] || 0;
+                          const isVoted = userVote?.option_letter === letter;
+                          return (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 6px', borderRadius: '4px', border: `1px solid ${isVoted ? '#52c41a' : '#e0e0e0'}`, background: isVoted ? '#f6ffed' : '#fff' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '26px', height: '20px', borderRadius: '3px', background: cfg.accent, color: '#fff', fontWeight: 'bold', fontSize: '10px', padding: '0 3px' }}>{letter}</span>
+                              <span style={{ flex: 1, fontSize: '12px', color: '#333' }}>{item}</span>
+                              {w > 0 && <span style={{ padding: '1px 6px', borderRadius: '8px', background: '#52c41a20', color: '#389e0d', fontSize: '10px', fontWeight: 'bold' }}>{w}</span>}
+                              {!readOnly && (
+                                <button onClick={() => castTypeVote(letter)}
+                                  title="Голосовать за этот пункт"
+                                  style={{ border: '1px solid #52c41a', background: isVoted ? '#52c41a' : '#f6ffed', color: isVoted ? '#fff' : '#389e0d', borderRadius: '3px', padding: '2px 8px', fontSize: '10px', cursor: 'pointer', flexShrink: 0 }}>
+                                  {isVoted ? '✓' : '+'}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '13px', lineHeight: 1.6, color: '#333' }}>
+                        <ReactMarkdown>{content}</ReactMarkdown>
+                      </div>
+                    )
+                  ) : (
+                    <div style={{ fontSize: '12px', color: '#999', fontStyle: 'italic' }}>Пусто — нажми 🪄 для генерации</div>
+                  )}
+
+                  {/* AI suggestion box for this section */}
+                  {(suggestingSection === suggestKey || (suggestingSection === null && suggestedContent && suggestedSectionName === suggestKey)) && (
+                    <div style={{ marginTop: '8px', padding: '10px', background: '#f0f5ff', borderRadius: '4px', border: '1px solid #adc6ff' }}>
+                      {suggestingSection === suggestKey ? (
+                        <div style={{ textAlign: 'center', color: '#2f54eb', fontSize: '12px' }}>
+                          <span style={{ fontSize: '16px' }}>🪄</span> AI генерирует...
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 700, color: '#2f54eb' }}>🪄 AI дополнение:</span>
+                            <div style={{ display: 'flex', gap: '4px' }}>
+                              <button onClick={() => handleApplySuggestion(suggestKey)} style={{ border: '1px solid #52c41a', background: '#f6ffed', color: '#389e0d', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}>+ Всё</button>
+                              <button onClick={() => { setSuggestedContent(''); setSuggestedSectionName(null); }} style={{ border: '1px solid #d0d0d0', background: '#fff', color: '#666', borderRadius: '3px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}>Отклонить</button>
+                            </div>
+                          </div>
+                          {isListSection ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              {parseListItems(suggestedContent.split('\n').filter(l => l.trim().match(/^[-*—–\d]/) || l.trim().length <= 60).join('\n')).map((line, i) => (
+                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ flex: 1, fontSize: '12px', color: '#333' }}>{line}</span>
+                                  <button onClick={() => handleApplyLine(suggestKey, line)} style={{ border: '1px solid #52c41a', background: '#f6ffed', color: '#389e0d', borderRadius: '3px', padding: '2px 8px', fontSize: '10px', cursor: 'pointer', whiteSpace: 'nowrap' }}>+ Добавить</button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: '12px', color: '#333', lineHeight: 1.5 }}>
+                              <ReactMarkdown>{suggestedContent}</ReactMarkdown>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {suggestError && suggestingSection === null && (
+                    <div style={{ color: '#ff4d4f', fontSize: '11px', marginTop: '4px' }}>{suggestError}</div>
+                  )}
+                </Section>
+              );
+            })}
+
+          {/* ПРОБЛЕМА: голосование за актуальность */}
+          {isProblem && (
+            <Section title="Актуальность проблемы" accent="#e74c3c">
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button onClick={() => castTypeVote('+')}
+                  title="Проблема реальна и актуальна"
+                  style={{ padding: '6px 16px', borderRadius: '4px', border: `1px solid ${myRelVote === '+' ? '#52c41a' : '#d0d0d0'}`, background: myRelVote === '+' ? '#52c41a' : '#f6ffed', color: myRelVote === '+' ? '#fff' : '#389e0d', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>
+                  👍 Актуальна ({relYesW})
+                </button>
+                <button onClick={() => castTypeVote('-')}
+                  title="Проблема не актуальна / уже решена"
+                  style={{ padding: '6px 16px', borderRadius: '4px', border: `1px solid ${myRelVote === '-' ? '#ff4d4f' : '#d0d0d0'}`, background: myRelVote === '-' ? '#ff4d4f' : '#fff2f0', color: myRelVote === '-' ? '#fff' : '#ff4d4f', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>
+                  👎 Не актуальна ({relNoW})
+                </button>
+                {myRelVote && (
+                  <button onClick={() => handleRemoveVote(myRelVote)} style={{ padding: '3px 10px', borderRadius: '4px', border: '1px solid #ffccc7', background: '#fff2f0', color: '#ff4d4f', cursor: 'pointer', fontSize: '11px' }}>✕ Сбросить мой голос</button>
+                )}
+              </div>
+              {(relYes.length > 0 || relNo.length > 0) && (
+                <div style={{ marginTop: '6px', fontSize: '11px', color: '#666' }}>
+                  {relYes.length > 0 && <div>👍 {relYes.map(v => v.username || '?').join(', ')}</div>}
+                  {relNo.length > 0 && <div>👎 {relNo.map(v => v.username || '?').join(', ')}</div>}
+                </div>
+              )}
+            </Section>
+          )}
+
+          {/* ОПЦИИ (только для decision/task) */}
+          {!isProblem && !isRequirement && !isParadigm && (
           <Section title="Опции" accent="#722ed1"
             extra={readOnly ? undefined : (
               <button
@@ -697,7 +941,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 fontSize: '14px', fontWeight: 'bold',
               }}>{selectedOption ? `Проголосовать за ${selectedOption}` : 'Выберите вариант'}</button>
               {userVote && (
-                <button onClick={handleRemoveVote} style={{ padding: '4px 12px', borderRadius: '4px', border: '1px solid #ffccc7', background: '#fff2f0', color: '#ff4d4f', cursor: 'pointer', fontSize: '12px' }}>✕ Отменить</button>
+                <button onClick={() => handleRemoveVote(selectedOption || userVote?.option_letter)} style={{ padding: '4px 12px', borderRadius: '4px', border: '1px solid #ffccc7', background: '#fff2f0', color: '#ff4d4f', cursor: 'pointer', fontSize: '12px' }}>✕ Отменить</button>
               )}
             </div>
 
@@ -720,9 +964,10 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               </table>
             )}
           </Section>
+          )}
 
           {/* РЕШЕНИЕ */}
-          {sections.decision && (
+          {!isProblem && !isRequirement && !isParadigm && sections.decision && (
             <Section title="Решение" accent="#52c41a">
               <div style={{ fontSize: '13px', lineHeight: 1.6, color: '#333' }}>
                 <ReactMarkdown>{sections.decision}</ReactMarkdown>
@@ -731,6 +976,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           )}
 
           {/* ПОСЛЕДСТВИЯ */}
+          {(nodeType === 'decision' || nodeType === 'task') && (
           <Section title="Последствия" accent="#fa8c16"
             extra={readOnly ? undefined : (
               <button
@@ -747,6 +993,16 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 <ReactMarkdown>{sections.consequences}</ReactMarkdown>
               </div>
             </Section>
+          )}
+
+          {/* ПЕРЕНЕСЕНО (мигрированный контент) */}
+          {sections.legacy && (
+            <Section title="Перенесено (старый формат)" accent="#8c8c8c">
+              <div style={{ fontSize: '12px', lineHeight: 1.5, color: '#666' }}>
+                <ReactMarkdown>{sections.legacy}</ReactMarkdown>
+              </div>
+            </Section>
+          )}
 
           {/* ─── AI АНАЛИЗ ─────────────────────────────────── */}
           <Section title="🔥 AI-анализ" accent="#fa541c">
@@ -968,10 +1224,29 @@ const btnLink: React.CSSProperties = { padding: '2px 8px', background: 'transpar
 const btnIcon: React.CSSProperties = { border: 'none', background: 'none', cursor: 'pointer', color: '#ff4d4f', fontSize: '14px' };
 const inputStyle = (w: number): React.CSSProperties => ({ width: w || 'auto', flex: w ? 'none' : 1, padding: '4px', border: '1px solid #d0d0d0', borderRadius: '3px', fontSize: '13px' });
 
-interface AdrSections { context: string; options: string; decision: string; consequences: string; other: string; }
+interface AdrSections {
+  context: string; options: string; decision: string; consequences: string;
+  symptoms: string; relevance: string; requirements: string; constraints: string;
+  acceptance: string; approaches: string; tradeoffs: string; legacy: string;
+}
+
+const SECTION_KEYS: Record<string, keyof AdrSections> = {
+  'контекст': 'context', 'контекста': 'context', 'context': 'context',
+  'опции': 'options', 'options': 'options', 'варианты': 'options',
+  'решение': 'decision', 'decision': 'decision',
+  'последствия': 'consequences', 'consequences': 'consequences',
+  'симптомы и факты': 'symptoms', 'симптомы': 'symptoms', 'symptoms': 'symptoms',
+  'критерии актуальности': 'relevance', 'актуальность': 'relevance', 'relevance': 'relevance',
+  'требования': 'requirements', 'requirements': 'requirements',
+  'ограничения': 'constraints', 'constraints': 'constraints',
+  'критерии приёмки': 'acceptance', 'приёмка': 'acceptance', 'acceptance': 'acceptance',
+  'подходы': 'approaches', 'approaches': 'approaches',
+  'трейд-оффы': 'tradeoffs', 'trade-offs': 'tradeoffs', 'tradeoffs': 'tradeoffs',
+  'перенесено': 'legacy',
+};
 
 function parseAdrBody(body: string): AdrSections {
-  const sections: AdrSections = { context: '', options: '', decision: '', consequences: '', other: '' };
+  const sections: AdrSections = { context: '', options: '', decision: '', consequences: '', symptoms: '', relevance: '', requirements: '', constraints: '', acceptance: '', approaches: '', tradeoffs: '', legacy: '' };
   const headerRegex = /^## (.+)$/gm;
   const matches: { title: string; start: number; end: number }[] = [];
   let m: RegExpExecArray | null;
@@ -983,17 +1258,56 @@ function parseAdrBody(body: string): AdrSections {
   }
   for (const match of matches) {
     const content = body.substring(match.start, match.end).trim();
-    if (match.title === 'context' || match.title === 'контекст' || match.title === 'контекста' || match.title === 'требование') {
-      sections.context = content;
-    } else if (match.title === 'options' || match.title === 'опции' || match.title === 'варианты') {
-      sections.options = content;
-    } else if (match.title === 'decision' || match.title === 'решение') {
-      sections.decision = content;
-    } else if (match.title === 'consequences' || match.title === 'последствия') {
-      sections.consequences = content;
+    if (!content) continue;
+    const key = SECTION_KEYS[match.title];
+    if (key === 'context' && sections.context) {
+      sections.legacy += (sections.legacy ? '\n\n' : '') + `## ${match.title}\n\n${content}`;
+    } else if (key) {
+      sections[key] = content;
+    } else {
+      sections.legacy += (sections.legacy ? '\n\n' : '') + `## ${match.title}\n\n${content}`;
     }
   }
   return sections;
+}
+
+/** Section layout per node type (mirrors server TYPE_SECTIONS). */
+const TYPE_SECTIONS: Record<string, { key: keyof AdrSections; title: string; accent: string }[]> = {
+  problem: [
+    { key: 'context', title: 'Контекст', accent: '#1890ff' },
+    { key: 'symptoms', title: 'Симптомы и факты', accent: '#e67e22' },
+    { key: 'relevance', title: 'Критерии актуальности', accent: '#e74c3c' },
+  ],
+  requirement: [
+    { key: 'context', title: 'Контекст', accent: '#1890ff' },
+    { key: 'requirements', title: 'Требования', accent: '#3498db' },
+    { key: 'constraints', title: 'Ограничения', accent: '#e67e22' },
+    { key: 'acceptance', title: 'Критерии приёмки', accent: '#2ecc71' },
+  ],
+  paradigm: [
+    { key: 'context', title: 'Контекст', accent: '#1890ff' },
+    { key: 'approaches', title: 'Подходы', accent: '#2ecc71' },
+    { key: 'tradeoffs', title: 'Трейд-оффы', accent: '#e67e22' },
+  ],
+  decision: [
+    { key: 'context', title: 'Контекст', accent: '#1890ff' },
+    { key: 'options', title: 'Опции', accent: '#722ed1' },
+    { key: 'decision', title: 'Решение', accent: '#52c41a' },
+    { key: 'consequences', title: 'Последствия', accent: '#fa8c16' },
+  ],
+  task: [
+    { key: 'context', title: 'Контекст', accent: '#1890ff' },
+    { key: 'decision', title: 'Решение', accent: '#52c41a' },
+    { key: 'consequences', title: 'Последствия', accent: '#fa8c16' },
+  ],
+};
+
+/** Extract numbered/bulleted items from a markdown list block. */
+function parseListItems(md: string): string[] {
+  return md.split('\n')
+    .map(l => l.trim())
+    .map(l => l.replace(/^[-*—–]\s+/, '').replace(/^\d+[.)]\s+/, '').replace(/\*\*/g, '').trim())
+    .filter(l => l.length > 2);
 }
 
 function statusColor(status: string): string {

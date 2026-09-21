@@ -370,10 +370,74 @@ export interface BodySections {
   options: string;
   decision: string;
   consequences: string;
+  // type-specific
+  symptoms: string;       // problem: симптомы/факты
+  relevance: string;      // problem: критерии актуальности
+  requirements: string;   // requirement: список требований
+  constraints: string;    // requirement: ограничения
+  acceptance: string;     // requirement: критерии приёмки
+  approaches: string;     // paradigm: подходы
+  tradeoffs: string;      // paradigm: трейд-оффы
+  legacy: string;         // migrated unknown content ('## Перенесено')
 }
 
+/** Empty superset record. */
+export function emptySections(): BodySections {
+  return { context: '', options: '', decision: '', consequences: '', symptoms: '', relevance: '', requirements: '', constraints: '', acceptance: '', approaches: '', tradeoffs: '', legacy: '' };
+}
+
+/**
+ * Section schema per node type: ordered list of [sectionKey, RU header].
+ * Defines which sections a type's card shows/edits AND the write order in MD.
+ */
+export const TYPE_SECTIONS: Record<string, [keyof BodySections, string][]> = {
+  problem: [
+    ['context', 'Контекст'],
+    ['symptoms', 'Симптомы и факты'],
+    ['relevance', 'Критерии актуальности'],
+  ],
+  requirement: [
+    ['context', 'Контекст'],
+    ['requirements', 'Требования'],
+    ['constraints', 'Ограничения'],
+    ['acceptance', 'Критерии приёмки'],
+  ],
+  paradigm: [
+    ['context', 'Контекст'],
+    ['approaches', 'Подходы'],
+    ['tradeoffs', 'Трейд-оффы'],
+  ],
+  decision: [
+    ['context', 'Контекст'],
+    ['options', 'Опции'],
+    ['decision', 'Решение'],
+    ['consequences', 'Последствия'],
+  ],
+  task: [
+    ['context', 'Контекст'],
+    ['decision', 'Решение'],
+    ['consequences', 'Последствия'],
+  ],
+};
+
+/** RU/EN header → section key (used by parser). */
+const SECTION_ALIASES: Record<string, keyof BodySections> = {
+  'контекст': 'context', 'контекста': 'context', 'context': 'context',
+  'опции': 'options', 'options': 'options', 'варианты': 'options',
+  'решение': 'decision', 'decision': 'decision',
+  'последствия': 'consequences', 'consequences': 'consequences',
+  'симптомы и факты': 'symptoms', 'симптомы': 'symptoms', 'symptoms': 'symptoms',
+  'критерии актуальности': 'relevance', 'актуальность': 'relevance', 'relevance': 'relevance',
+  'требования': 'requirements', 'requirements': 'requirements',
+  'ограничения': 'constraints', 'constraints': 'constraints',
+  'критерии приёмки': 'acceptance', 'приёмка': 'acceptance', 'acceptance': 'acceptance',
+  'подходы': 'approaches', 'approaches': 'approaches',
+  'трейд-оффы': 'tradeoffs', 'trade-offs': 'tradeoffs', 'tradeoffs': 'tradeoffs',
+  'перенесено': 'legacy',
+};
+
 export function parseBodySections(body: string): BodySections {
-  const sections: BodySections = { context: '', options: '', decision: '', consequences: '' };
+  const sections = emptySections();
   const headerRegex = /^## (.+)$/gm;
   const matches: { title: string; start: number; end: number }[] = [];
   let m: RegExpExecArray | null;
@@ -385,14 +449,16 @@ export function parseBodySections(body: string): BodySections {
   }
   for (const match of matches) {
     const content = body.substring(match.start, match.end).trim();
-    if (match.title === 'context' || match.title === 'контекст' || match.title === 'контекста' || match.title === 'требование') {
-      sections.context = content;
-    } else if (match.title === 'options' || match.title === 'опции' || match.title === 'варианты') {
-      sections.options = content;
-    } else if (match.title === 'decision' || match.title === 'решение') {
-      sections.decision = content;
-    } else if (match.title === 'consequences' || match.title === 'последствия') {
-      sections.consequences = content;
+    if (!content) continue;
+    const key = SECTION_ALIASES[match.title];
+    if (key === 'context' && sections.context) {
+      // legacy files sometimes used '## Требование' as context header — don't overwrite real context
+      sections.legacy += (sections.legacy ? '\n\n' : '') + `## ${match.title}\n\n${content}`;
+    } else if (key) {
+      (sections as any)[key] = content;
+    } else {
+      // Unknown section — preserve it in legacy so no data is lost on rewrite
+      sections.legacy += (sections.legacy ? '\n\n' : '') + `## ${match.title}\n\n${content}`;
     }
   }
   return sections;
@@ -412,6 +478,15 @@ export interface AdrInput {
   options?: { letter: string; title: string; description?: string }[];
   decision?: string;
   consequences?: string;
+  // type-specific sections
+  symptoms?: string;
+  relevance?: string;
+  requirements?: string;
+  constraints?: string;
+  acceptance?: string;
+  approaches?: string;
+  tradeoffs?: string;
+  legacy?: string;
   created?: string;
 }
 
@@ -433,27 +508,42 @@ export function generateAdrMarkdown(input: AdrInput): { filename: string; conten
   fm += `created: ${created}\n`;
   fm += `---\n\n`;
 
-  // Build body
+  // Build body — sections depend on node type
   let body = '';
 
   if (input.context) {
     body += `## Контекст\n\n${input.context}\n\n`;
   }
 
-  if (input.options?.length) {
-    body += `## Опции\n\n`;
-    for (const opt of input.options) {
-      body += `### Option ${opt.letter}: ${opt.title}\n\n`;
-      if (opt.description) body += `${opt.description}\n\n`;
+  if (type === 'problem') {
+    if (input.symptoms) body += `## Симптомы и факты\n\n${input.symptoms}\n\n`;
+    if (input.relevance) body += `## Критерии актуальности\n\n${input.relevance}\n\n`;
+  } else if (type === 'requirement') {
+    if (input.requirements) body += `## Требования\n\n${input.requirements}\n\n`;
+    if (input.constraints) body += `## Ограничения\n\n${input.constraints}\n\n`;
+    if (input.acceptance) body += `## Критерии приёмки\n\n${input.acceptance}\n\n`;
+  } else if (type === 'paradigm') {
+    if (input.approaches) body += `## Подходы\n\n${input.approaches}\n\n`;
+    if (input.tradeoffs) body += `## Трейд-оффы\n\n${input.tradeoffs}\n\n`;
+  } else {
+    // decision / task / legacy types — classic ADR layout
+    if (input.options?.length) {
+      body += `## Опции\n\n`;
+      for (const opt of input.options) {
+        body += `### Option ${opt.letter}: ${opt.title}\n\n`;
+        if (opt.description) body += `${opt.description}\n\n`;
+      }
+    }
+    if (input.decision) {
+      body += `## Решение\n\n${input.decision}\n\n`;
+    }
+    if (input.consequences) {
+      body += `## Последствия\n\n${input.consequences}\n\n`;
     }
   }
 
-  if (input.decision) {
-    body += `## Решение\n\n${input.decision}\n\n`;
-  }
-
-  if (input.consequences) {
-    body += `## Последствия\n\n${input.consequences}\n\n`;
+  if (input.legacy) {
+    body += `${input.legacy}\n\n`;
   }
 
   // Filename: slugify title
