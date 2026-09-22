@@ -5,13 +5,40 @@ const NODE_WIDTH = 120;
 const NODE_HEIGHT = 50;
 const RICH_NODE_WIDTH = 200;
 const RICH_NODE_HEIGHT = 120;
+const RICH_NODE_MAX_HEIGHT = 240; // 2× standard card — keep in sync with .node--rich in styles.module.css
 const VERTICAL_GAP = 70;
 const HORIZONTAL_GAP = 40;
 const PADDING = 20;
 
+/**
+ * Estimate the rendered height of a rich card so that the layout (dagre)
+ * reserves as much vertical space as the card will actually take.
+ * Must stay in sync with TreeNode.tsx rendering + styles.module.css:
+ *  - header: 8+8px padding + up to 2 title lines (11px × 1.2)
+ *  - option item: clamped to 2 lines (10px × 1.3) + 2px vertical padding, ~35 chars/line
+ *  - vote bar: 16px
+ * Result clamped to [RICH_NODE_HEIGHT, RICH_NODE_MAX_HEIGHT].
+ */
+export function estimateRichNodeHeight(node: TreeNode): number {
+  const opts = node.options ?? [];
+  const headerLines = Math.min(2, Math.max(1, Math.ceil(node.text.length / 28)));
+  let h = 17 + headerLines * 13.2; // header padding + border + title lines
+  if (opts.length > 0) {
+    h += 4; // list margin-top
+    for (const opt of opts) {
+      const lines = Math.min(2, Math.max(1, Math.ceil(opt.title.length / 35)));
+      h += lines * 13 + 2; // clamped item text + vertical padding
+    }
+  } else if (node.description) {
+    h += 16 + 2 * 16.8; // content padding + 2 clamped description lines (12px × 1.4)
+  }
+  if (node.voteSectors && node.voteSectors.length > 0) h += 16; // vote sector bar
+  return Math.min(Math.max(Math.ceil(h) + 2, RICH_NODE_HEIGHT), RICH_NODE_MAX_HEIGHT);
+}
+
 export function getNodeSize(node: TreeNode): { width: number; height: number } {
   return node.type === 'rich'
-    ? { width: RICH_NODE_WIDTH, height: RICH_NODE_HEIGHT }
+    ? { width: RICH_NODE_WIDTH, height: estimateRichNodeHeight(node) }
     : { width: NODE_WIDTH, height: NODE_HEIGHT };
 }
 

@@ -173,7 +173,7 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
 
           {/* Option list */}
           {node.options && node.options.length > 0 && (
-            <ul style={{
+            <ul className={styles.node__options} style={{
               listStyle: 'none',
               padding: 0,
               margin: '4px 0 0 0',
@@ -195,6 +195,13 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
                   <span style={{
                     textDecoration: node.winnerVote && node.winnerVote !== opt.letter ? 'line-through' : 'none',
                     opacity: node.winnerVote && node.winnerVote !== opt.letter ? 0.5 : 1,
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                    overflowWrap: 'break-word',
+                    flex: 1,
+                    minWidth: 0,
                   }}>
                     {opt.title}
                   </span>

@@ -75,11 +75,19 @@
 .node--rich {
   width: 220px;
   min-height: 120px;
-  max-height: 280px;
+  max-height: 240px; /* 2× standard card — keep in sync with RICH_NODE_MAX_HEIGHT in utils/positions.ts */
   padding: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* Option list: grows with content up to the card cap, then scrolls */
+.node__options {
+  min-height: 0;
+  overflow-y: auto;
+  flex: 0 1 auto;
+  scrollbar-width: thin;
 }
 
 .node__header {
