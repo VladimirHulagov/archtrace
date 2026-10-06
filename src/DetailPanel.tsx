@@ -44,6 +44,7 @@ export interface DetailPanelProps {
   onTitleChange?: (newTitle: string) => void; // callback to update parent state after title edit
   onBodyChange?: (newBody: string) => void; // callback to update parent state after body/context edit
   onSymptomTrace?: (nodeId: string, letter: string) => void; // highlight trace edge on canvas
+  activeTraceInfo?: { nodeId: string; letter: string } | null; // current trace (row highlight)
   onClose: () => void;
   onDeleteNode?: () => void;
   initialMode?: 'sidebar' | 'modal';
@@ -54,7 +55,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   detail, comments, votes,
   currentUserId, currentRole,
   onCommentsChange, onVotesChange, onOptionsChange, onTitleChange, onBodyChange, onClose, onDeleteNode, initialMode,
-  readOnly = false, onSymptomTrace,
+  readOnly = false, onSymptomTrace, activeTraceInfo,
 }) => {
   const [mode, setMode] = useState<PanelMode>(initialMode || 'sidebar');
   const [width, setWidth] = useState(420);
@@ -732,8 +733,9 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                           const isVoted = userVote?.option_letter === letter;
                           const isSymptom = cfg.key === 'symptoms';
                           const badge = isSymptom ? `S${i + 1}` : votable ? letter : null;
+                          const isTracedRow = isSymptom && activeTraceInfo && activeTraceInfo.nodeId === detail.id && activeTraceInfo.letter === badge;
                           return (
-                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 6px', borderRadius: '4px', border: `1px solid ${isVoted ? '#52c41a' : '#e0e0e0'}`, background: isVoted ? '#f6ffed' : '#fff' }}>
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 6px', borderRadius: '4px', border: `1px solid ${isVoted ? '#52c41a' : isTracedRow ? '#e67e22' : '#e0e0e0'}`, background: isVoted ? '#f6ffed' : isTracedRow ? 'rgba(230,126,34,0.14)' : '#fff' }}>
                               {badge && <span
                                 onClick={isSymptom && onSymptomTrace ? (e) => { e.stopPropagation(); onSymptomTrace(detail.id, badge); } : undefined}
                                 title={isSymptom ? 'Клик — подсветить трассу на графе' : undefined}

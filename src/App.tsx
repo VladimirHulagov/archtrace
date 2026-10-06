@@ -50,6 +50,7 @@ function decisionToTreeNode(d: DecisionNode): TreeNode {
 
 function App() {
   const traceRequestRef = useRef<(nodeId: string, letter: string) => void>(() => {});
+  const [activeTraceInfo, setActiveTraceInfo] = useState<{ nodeId: string; letter: string } | null>(null);
   const [nodes, setNodes] = useState<TreeNode[]>([]);
   const [connections, setConnections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -750,6 +751,7 @@ function App() {
           onDeselect={() => setSelectedDetail(null)}
           onNodeClick={handleNodeClick}
           onTraceReady={(trigger) => { traceRequestRef.current = trigger; }}
+          onTraceChange={setActiveTraceInfo}
         />
       </div>
 
@@ -779,7 +781,8 @@ function App() {
             setNodes(prev => prev.map(n => n.id === selectedDetail.id ? { ...n, text: newTitle } : n));
           }}
           onBodyChange={(newBody) => setSelectedDetail(prev => prev ? { ...prev, body: newBody } : prev)}
-          onSymptomTrace={traceRequestRef.current}
+          onSymptomTrace={(nodeId: string, letter: string) => traceRequestRef.current(nodeId, letter)}
+          activeTraceInfo={activeTraceInfo}
           onClose={() => setSelectedDetail(null)}
           onDeleteNode={histIndex === null ? () => {
             if (selectedDetail) handleDeleteNode(selectedDetail.id);

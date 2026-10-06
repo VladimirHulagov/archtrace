@@ -15,6 +15,8 @@ export interface TreeProps extends SimpleTreeProps {
   edgePoints?: Map<string, import('./types').Point[]>;
   phaseBands?: any[];
   onDeselect?: () => void;
+  /** Publishes current trace (nodeId+letter or null) whenever it changes. */
+  onTraceChange?: (info: { nodeId: string; letter: string } | null) => void;
   /** Registers a handler so the DetailPanel can trigger a trace (S-badge click). */
   onTraceReady?: (trigger: (nodeId: string, letter: string) => void) => void;
 }
@@ -140,12 +142,14 @@ export const Tree: React.FC<TreeProps> = ({
   pendingNewNode,
   onDeselect,
   onTraceReady,
+  onTraceChange,
   className,
 }) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   // Symptom trace: clicking an S-badge highlights the edge to its addressee node
   const [activeTrace, setActiveTrace] = useState<{ from: string; to: string; letter: string } | null>(null);
+  // (panel mirror lives in App via onTraceChange)
   const [isConnectionMode, setIsConnectionMode] = useState(false);
   const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
   const [editingNode, setEditingNode] = useState<TreeNode | null>(null);
@@ -216,6 +220,11 @@ export const Tree: React.FC<TreeProps> = ({
   }, []);
 
   const clearTrace = useCallback(() => setActiveTrace(null), []);
+
+  // Publish current trace to the parent so DetailPanel can highlight the row
+  useEffect(() => {
+    if (onTraceChange) onTraceChange(activeTrace ? { nodeId: activeTrace.from, letter: activeTrace.letter } : null);
+  }, [activeTrace, onTraceChange]);
 
   // Path highlight: when a node is selected, highlight every edge on its full
   // lineage — all ancestor edges (up to the root) and all descendant edges
