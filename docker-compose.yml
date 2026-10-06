@@ -24,8 +24,10 @@ services:
       - PORT=3001
       # Database (container-to-container on traefik-public network)
       - DATABASE_URL=postgresql://archtrace:archtrace_dev_2026@archtrace-db:5432/archtrace
-      # LLM API for AI architectural analysis
+      # LLM API for AI architectural analysis (+ fallback key when primary hits weekly limit)
       - ZAI_API_KEY=${ZAI_API_KEY}
+      - ZAI_API_KEY_FALLBACK_1=${ZAI_API_KEY_FALLBACK_1}
+      - ZAI_API_KEY_FALLBACK_2=${ZAI_API_KEY_FALLBACK_2}
       # Git credentials for ADR repo push
       - GIT_AUTHOR_NAME=ArchTrace
       - GIT_AUTHOR_EMAIL=archtrace@bots.collaborationism.tech

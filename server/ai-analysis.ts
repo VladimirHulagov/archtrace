@@ -12,6 +12,8 @@
 import https from 'https';
 
 const ZAI_API_KEY = process.env.ZAI_API_KEY || '';
+const ZAI_API_KEYS = [process.env.ZAI_API_KEY, process.env.ZAI_API_KEY_FALLBACK_1, process.env.ZAI_API_KEY_FALLBACK_2].filter(Boolean) as string[];
+let zaiKeyIndex = 0;
 const MODEL = 'glm-5.2';
 
 interface AnalysisContext {
@@ -168,7 +170,7 @@ function buildAdrPrompt(ctx: AnalysisContext): string {
 }
 
 export async function runSectionSuggestion(params: {
-  section: 'context' | 'options' | 'consequences';
+  section: 'context' | 'options' | 'consequences' | 'symptoms' | 'relevance' | 'requirements' | 'constraints' | 'acceptance' | 'approaches' | 'tradeoffs';
   title: string;
   currentContent: string;
   phase: number;
@@ -198,20 +200,40 @@ export async function runSectionSuggestion(params: {
     return s;
   };
 
-  // ── PROBLEM: reflect on relevance, NOT options ──
+  // ── PROBLEM: section-aware — symptoms/facts vs relevance criteria ──
   if (nodeType === 'problem') {
     prompt += `Проблема: "${title}".\n\n`;
     prompt += ctxBlock();
     if (currentContent?.trim()) {
       prompt += `Уже есть:\n${currentContent}\n\nВАЖНО: существующие пункты (включая добавленные вручную) УЖЕ учтены — пиши ТОЛЬКО новые дополнения, не повторяй и не перефразируй существующее.\n\n`;
     }
-    prompt += `Задача — помочь ОСОЗНАТЬ актуальность проблемы:\n`;
-    prompt += `- Какие факты/симптомы подтверждают, что проблема реальна и сейчас болезненна?\n`;
-    prompt += `- Что случится, если её НЕ решать (цена бездействия, сроки)?\n`;
-    prompt += `- Какие критерии покажут, что проблема решена или перестала быть актуальной?\n`;
-    prompt += `- Если данных не хватает — сформулируй, ЧТО нужно узнать (открытые вопросы).\n\n`;
-    prompt += `НЕ предлагай решений и технологий. Только осознание проблемы.\n`;
-    prompt += `Формат: структурированный markdown, кратко. Русский язык. Максимум 250 слов.`;
+    if (section === 'symptoms') {
+      // «Симптомы и факты»: каждый пункт — отдельный атомарный факт/симптом (рендерится как S1..Sn, кликабельно)
+      prompt += `Секция «СИМПТОМЫ И ФАКТЫ» — перечисление конкретных наблюдаемых фактов и симптомов, подтверждающих, что проблема реальна.\n\n`;
+      prompt += `КЛАССИФИКАЦИЯ пунктов — включай только:\n`;
+      prompt += `- КОНКРЕТНЫЙ ФАКТ: измерение, число, ограничение спеки, анонс, решение комитета («utilization 27% на 4B», «спека не определяет X», «вендор Y анонсировал Z»)\n`;
+      prompt += `- НАБЛЮДАЕМЫЙ СИМПТОМ: воспроизводимое поведение, показывающее боль («каждая комбинация = ручная интеграция», «расчёт полосы не сходится при питче 40 мкм»)\n`;
+      prompt += `- ИСТОК ВЕТКИ: если из факта прямо следует целое направление работ — это тоже пункт, в конце добавь пометку адресата «(→ NNN)» по номеру существующей дочерней карточки\n\n`;
+      prompt += `НЕ включай в этот список:\n`;
+      prompt += `- обобщения без конкретики («индустрия движется вперёд»)\n`;
+      prompt += `- гипотезы и мнения без источника в контексте\n`;
+      prompt += `- последствия бездействия и критерии решения — это секция «Критерии актуальности», не эта\n\n`;
+      prompt += `ФОРМАТ — СТРОГО:\n`;
+      prompt += `- каждый пункт — одна строка, начинается с тире «- »\n`;
+      prompt += `- АТОМАРНОСТЬ: один пункт = один факт/симптом; два разных факта — две строки\n`;
+      prompt += `- строка НЕ должна начинаться с «Проблема», «Симптом», «Факт» — сразу содержание\n`;
+      prompt += `- до ~200 символов, без воды\n`;
+      prompt += `- если данных не хватает — отдельный пункт «Открытый вопрос: что нужно узнать»\n\n`;
+      prompt += `НЕ предлагай решений и технологий. Русский язык. 3-6 пунктов.`;
+    } else {
+      // relevance / прочие секции problem-узла
+      prompt += `Задача — помочь ОСОЗНАТЬ актуальность проблемы:\n`;
+      prompt += `- Что случится, если её НЕ решать (цена бездействия, сроки)?\n`;
+      prompt += `- Какие критерии покажут, что проблема решена или перестала быть актуальной?\n`;
+      prompt += `- Если данных не хватает — сформулируй, ЧТО нужно узнать (открытые вопросы).\n\n`;
+      prompt += `НЕ предлагай решений и технологий. Только осознание проблемы.\n`;
+      prompt += `Формат: структурированный markdown, кратко. Русский язык. Максимум 250 слов.`;
+    }
   }
   // ── REQUIREMENT: generate requirements BY ANALOGY (bullet list like options) ──
   else if (nodeType === 'requirement') {
@@ -320,6 +342,27 @@ export async function runSectionSuggestion(params: {
 }
 
 async function callZai(body: string): Promise<string> {
+  if (ZAI_API_KEYS.length === 0) throw new Error('ZAI_API_KEY not configured');
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < ZAI_API_KEYS.length; attempt++) {
+    try {
+      const content = await callZaiOnce(body, ZAI_API_KEYS[zaiKeyIndex]);
+      return content;
+    } catch (err: any) {
+      lastError = err;
+      // 401/429 (invalid key or quota exhausted) → rotate to the next key and retry
+      const rotating = /HTTP (401|429)|1310|Limit Exhausted|unauthorized/i.test(String(err?.message || ''));
+      if (rotating && zaiKeyIndex < ZAI_API_KEYS.length - 1) {
+        zaiKeyIndex += 1;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError || new Error('Z.ai failed');
+}
+
+async function callZaiOnce(body: string, apiKey: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const options: https.RequestOptions = {
       hostname: 'api.z.ai',
@@ -327,7 +370,7 @@ async function callZai(body: string): Promise<string> {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${ZAI_API_KEY}`,
+        'Authorization': `Bearer ${apiKey}`,
       },
     };
 
@@ -337,6 +380,11 @@ async function callZai(body: string): Promise<string> {
       res.on('end', () => {
         try {
           const json = JSON.parse(data);
+          if (json.error) {
+            const msg = json.error.message || json.error.code || 'unknown';
+            reject(new Error(`Z.ai API HTTP ${res.statusCode}: ${msg}`));
+            return;
+          }
           const content = json.choices?.[0]?.message?.content || 'Анализ недоступен';
           resolve(content);
         } catch {
