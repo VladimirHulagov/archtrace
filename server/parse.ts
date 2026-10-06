@@ -286,12 +286,13 @@ function parseOptions(body: string): { letter: string; title: string }[] {
 }
 
 /**
- * Parse requirement items from the '## Требования' section of a requirement
- * node into option-shaped entries (R1, R2, ...) so tree cards can render them
- * exactly like decision options (incl. winner-vote strikethrough).
+ * Parse bulleted list items from a named '## <header>' section into
+ * option-shaped entries (P1..Pn) so tree cards can render them exactly like
+ * decision options (incl. winner-vote strikethrough). Used for requirement
+ * items (Требования, prefix R) and problem symptoms (Симптомы и факты, S).
  */
-function parseRequirementItems(body: string): { letter: string; title: string }[] {
-  const m = body.match(/^##\s+Требования\s*$/m);
+function parseSectionItemsAsOptions(body: string, header: string, prefix: string): { letter: string; title: string }[] {
+  const m = body.match(new RegExp(`^##\\s+${header}\\s*$`, 'm'));
   if (!m) return [];
   const rest = body.slice(m.index! + m[0].length);
   const section = rest.split(/^##\s+/m)[0];
@@ -301,10 +302,18 @@ function parseRequirementItems(body: string): { letter: string; title: string }[
     const lm = t.match(/^[-*\u2014\u2013]\s+(.+)$/) || t.match(/^\d+[.)]\s+(.+)$/);
     if (lm) {
       const title = lm[1].trim();
-      if (title) items.push({ letter: 'R' + (items.length + 1), title });
+      if (title) items.push({ letter: prefix + (items.length + 1), title });
     }
   }
   return items;
+}
+
+function parseRequirementItems(body: string): { letter: string; title: string }[] {
+  return parseSectionItemsAsOptions(body, 'Требования', 'R');
+}
+
+function parseSymptomItems(body: string): { letter: string; title: string }[] {
+  return parseSectionItemsAsOptions(body, 'Симптомы и факты', 'S');
 }
 
 export function parseDecisionFile(filePath: string): DecisionNode | null {
@@ -327,7 +336,11 @@ export function parseDecisionFile(filePath: string): DecisionNode | null {
     voters: frontmatter.voters || [],
     options: parsedOptions.length > 0
       ? parsedOptions
-      : (rawType === 'requirement' ? parseRequirementItems(body) : []),
+      : rawType === 'requirement'
+        ? parseRequirementItems(body)
+        : rawType === 'problem'
+          ? parseSymptomItems(body)
+          : [],
     body: body.trim(),
     file: path.basename(filePath),
   };

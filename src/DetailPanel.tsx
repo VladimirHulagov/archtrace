@@ -729,9 +729,11 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                           const letter = reqLetter(i);
                           const w = voteTally[letter] || 0;
                           const isVoted = userVote?.option_letter === letter;
+                          const isSymptom = cfg.key === 'symptoms';
+                          const badge = isSymptom ? `S${i + 1}` : votable ? letter : null;
                           return (
                             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 6px', borderRadius: '4px', border: `1px solid ${isVoted ? '#52c41a' : '#e0e0e0'}`, background: isVoted ? '#f6ffed' : '#fff' }}>
-                              {votable && <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '26px', height: '20px', borderRadius: '3px', background: cfg.accent, color: '#fff', fontWeight: 'bold', fontSize: '10px', padding: '0 3px' }}>{letter}</span>}
+                              {badge && <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '26px', height: '20px', borderRadius: '3px', background: cfg.accent, color: '#fff', fontWeight: 'bold', fontSize: '10px', padding: '0 3px', flexShrink: 0 }}>{badge}</span>}
                               <span style={{ flex: 1, fontSize: '12px', color: '#333' }}>{item}</span>
                               {votable && w > 0 && <span style={{ padding: '1px 6px', borderRadius: '8px', background: '#52c41a20', color: '#389e0d', fontSize: '10px', fontWeight: 'bold' }}>{w}</span>}
                               {votable && !readOnly && (
