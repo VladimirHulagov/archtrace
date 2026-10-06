@@ -49,6 +49,7 @@ function decisionToTreeNode(d: DecisionNode): TreeNode {
 }
 
 function App() {
+  const traceRequestRef = useRef<(nodeId: string, letter: string) => void>(() => {});
   const [nodes, setNodes] = useState<TreeNode[]>([]);
   const [connections, setConnections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -748,6 +749,7 @@ function App() {
           edgePoints={edgePoints}
           onDeselect={() => setSelectedDetail(null)}
           onNodeClick={handleNodeClick}
+          onTraceReady={(trigger) => { traceRequestRef.current = trigger; }}
         />
       </div>
 
@@ -777,6 +779,7 @@ function App() {
             setNodes(prev => prev.map(n => n.id === selectedDetail.id ? { ...n, text: newTitle } : n));
           }}
           onBodyChange={(newBody) => setSelectedDetail(prev => prev ? { ...prev, body: newBody } : prev)}
+          onSymptomTrace={traceRequestRef.current}
           onClose={() => setSelectedDetail(null)}
           onDeleteNode={histIndex === null ? () => {
             if (selectedDetail) handleDeleteNode(selectedDetail.id);

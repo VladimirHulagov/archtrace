@@ -15,6 +15,8 @@ export interface TreeProps extends SimpleTreeProps {
   edgePoints?: Map<string, import('./types').Point[]>;
   phaseBands?: any[];
   onDeselect?: () => void;
+  /** Registers a handler so the DetailPanel can trigger a trace (S-badge click). */
+  onTraceReady?: (trigger: (nodeId: string, letter: string) => void) => void;
 }
 
 // Edge points are computed by dagre and passed via edgePoints prop
@@ -137,10 +139,13 @@ export const Tree: React.FC<TreeProps> = ({
   phaseBands,
   pendingNewNode,
   onDeselect,
+  onTraceReady,
   className,
 }) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+  // Symptom trace: clicking an S-badge highlights the edge to its addressee node
+  const [activeTrace, setActiveTrace] = useState<{ from: string; to: string; letter: string } | null>(null);
   const [isConnectionMode, setIsConnectionMode] = useState(false);
   const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
   const [editingNode, setEditingNode] = useState<TreeNode | null>(null);
@@ -210,10 +215,13 @@ export const Tree: React.FC<TreeProps> = ({
     }
   }, []);
 
+  const clearTrace = useCallback(() => setActiveTrace(null), []);
+
   const handleContainerClick = useCallback((e: React.MouseEvent) => {
     if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains(styles.connectionLayer)) {
       setSelectedNodeId(null);
       setSelectedConnectionId(null);
+      setActiveTrace(null);
       
       if (onDeselect) onDeselect();
       
@@ -229,6 +237,7 @@ export const Tree: React.FC<TreeProps> = ({
     (node: TreeNode, e: React.MouseEvent) => {
       e.stopPropagation();
       setSelectedConnectionId(null);
+      setActiveTrace(null);
       setSelectedNodeId(node.id);
       announce(`Node ${node.text} selected`);
       
@@ -299,6 +308,7 @@ export const Tree: React.FC<TreeProps> = ({
     (connectionId: string) => {
       setSelectedNodeId(null);
       setSelectedConnectionId(connectionId);
+      setActiveTrace(null);
       const conn = connections.find((c) => c.id === connectionId);
       if (conn) {
         const fromNode = nodes.find((n) => n.id === conn.from);
@@ -308,6 +318,29 @@ export const Tree: React.FC<TreeProps> = ({
     },
     [connections, nodes, announce]
   );
+
+  const handleOptionClick = useCallback(
+    (node: TreeNode, letter: string) => {
+      // Resolve addressee from the item title: "... (→ 002)" / "... -> 002"
+      const opt = (node.options || []).find(o => o.letter === letter);
+      const tm = opt?.title.match(/[-=>»\s]{1,3}\s*(\d{2,4})\s*[,)]/) || opt?.title.match(/(?:→|->)\s*(\d{2,4})/);
+      if (!tm) return;
+      const targetId = tm[1];
+      const edge = connections.find(c => c.from === node.id && c.to === targetId);
+      if (!edge) { announce(`Для ${letter} нет прямой связи к узлу ${targetId}`); return; }
+      setActiveTrace(prev => prev && prev.from === node.id && prev.letter === letter ? null : { from: node.id, to: targetId, letter });
+      announce(`Трасса ${letter}: ${node.text} → ${targetId}`);
+    },
+    [connections, announce]
+  );
+
+  // Publish the trace trigger upward (App wires it into DetailPanel)
+  useEffect(() => {
+    if (onTraceReady) onTraceReady((nodeId, letter) => {
+      const node = nodes.find(n => n.id === nodeId);
+      if (node) handleOptionClick(node, letter);
+    });
+  }, [onTraceReady, nodes, handleOptionClick]);
 
   const handleAddNode = useCallback(() => {
     if (onAddNode) {
@@ -384,6 +417,7 @@ export const Tree: React.FC<TreeProps> = ({
       if (!isNode && !isConnection && !isButton && isCanvas) {
         setSelectedNodeId(null);
         setSelectedConnectionId(null);
+        setActiveTrace(null);
         if (onDeselect) onDeselect();
       }
     };
@@ -404,6 +438,7 @@ export const Tree: React.FC<TreeProps> = ({
         } else {
           setSelectedNodeId(null);
           setSelectedConnectionId(null);
+          setActiveTrace(null);
           announce('Selection cleared');
         }
         return;
@@ -650,6 +685,7 @@ export const Tree: React.FC<TreeProps> = ({
                   bendY={bendYs.get(conn.id)}
                   allNodes={nodes}
                   isSelected={selectedConnectionId === conn.id}
+                  isTrace={!!activeTrace && conn.from === activeTrace.from && conn.to === activeTrace.to}
                   onClick={handleConnectionClick}
                   onDelete={handleDeleteConnection}
                 />
@@ -657,23 +693,30 @@ export const Tree: React.FC<TreeProps> = ({
             })}
           </svg>
           
-          {nodes.map((node) => (
-            <AnimatedNode
-              key={node.id}
-              node={node}
-              isSelected={selectedNodeId === node.id}
-              isConnecting={isConnectionMode}
-              connectionSource={connectionSourceId}
-              onSelect={handleNodeSelect}
-              onDoubleClick={handleNodeDoubleClick}
-              onDrag={handleNodeDrag}
-              onUpdate={handleNodeUpdate}
-              onConnectionStart={handleConnectionStart}
-              onConnectionEnd={handleConnectionEnd}
-              onDeleteNode={onDeleteNode}
-              isAnimated={isAnimating}
-            />
-          ))}
+          {nodes.map((node) => {
+            const isTraceSource = !!activeTrace && node.id === activeTrace.from;
+            const isTraceTarget = !!activeTrace && node.id === activeTrace.to;
+            return (
+              <AnimatedNode
+                key={node.id}
+                node={node}
+                isSelected={selectedNodeId === node.id}
+                isConnecting={isConnectionMode}
+                connectionSource={connectionSourceId}
+                onSelect={handleNodeSelect}
+                onDoubleClick={handleNodeDoubleClick}
+                onDrag={handleNodeDrag}
+                onUpdate={handleNodeUpdate}
+                onConnectionStart={handleConnectionStart}
+                onConnectionEnd={handleConnectionEnd}
+                onDeleteNode={onDeleteNode}
+                isAnimated={isAnimating}
+                traceState={isTraceSource ? 'source' : isTraceTarget ? 'target' : null}
+                activeTraceLetter={isTraceSource ? activeTrace!.letter : null}
+                onOptionClick={handleOptionClick}
+              />
+            );
+          })}
         </TransformComponent>
       </TransformWrapper>
       

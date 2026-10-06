@@ -25,6 +25,7 @@ interface ConnectionProps {
   portOffset?: PortOffset;
   bendY?: number;
   allNodes?: TreeNode[];
+  isTrace?: boolean; // symptom trace highlight (S1 -> addressee)
 }
 
 /**
@@ -226,6 +227,7 @@ export const Connection: React.FC<ConnectionProps> = ({
   portOffset,
   bendY,
   allNodes,
+  isTrace,
 }) => {
   const pathRef = useRef<SVGPathElement>(null);
   const [isHovered, setIsHovered] = React.useState(false);
@@ -282,7 +284,7 @@ export const Connection: React.FC<ConnectionProps> = ({
       <path
         ref={pathRef}
         d={pathData}
-        className={`${styles.connection} ${crossRefClass} ${isSelected ? styles['connection--selected'] : ''}`}
+        className={`${styles.connection} ${crossRefClass} ${isSelected ? styles['connection--selected'] : ''} ${isTrace ? styles['connection--trace'] : ''}`}
         onClick={handleClick}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}

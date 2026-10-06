@@ -188,6 +188,13 @@
   stroke-width: 3px;
 }
 
+/* Symptom trace highlight: orange, thicker, on top of plain edges */
+.connection--trace {
+  stroke: #e67e22;
+  stroke-width: 3.5px;
+  filter: drop-shadow(0 0 4px rgba(230, 126, 34, 0.65));
+}
+
 .connection--cross-ref {
   stroke-dasharray: 6 4;
   stroke: #999;

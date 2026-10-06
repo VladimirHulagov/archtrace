@@ -14,6 +14,10 @@ export interface TreeNodeProps {
   onConnectionStart: (nodeId: string) => void;
   onConnectionEnd: (nodeId: string) => void;
   onDeleteNode?: (nodeId: string) => void;
+  // Symptom trace: 'source' = node owning the clicked S-item, 'target' = its addressee
+  traceState?: 'source' | 'target' | null;
+  activeTraceLetter?: string | null;
+  onOptionClick?: (node: TreeNode, letter: string) => void;
 }
 
 const VOTE_COLORS: Record<string, string> = {
@@ -42,6 +46,9 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
   onConnectionStart,
   onConnectionEnd,
   onDeleteNode,
+  traceState,
+  activeTraceLetter,
+  onOptionClick,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -114,6 +121,7 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
   const nodeStyle: React.CSSProperties = {
     left: node.x, top: node.y,
     cursor: isDragging ? 'grabbing' : isConnecting ? 'crosshair' : canDrag ? 'grab' : 'pointer',
+    boxShadow: traceState ? '0 0 0 3px rgba(230, 126, 34, 0.45)' : undefined,
   };
 
   return (
@@ -183,13 +191,23 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
             }}>
               {node.options.map(opt => (
                 <li key={opt.letter} style={{ display: 'flex', gap: '4px', padding: '1px 0' }}>
-                  <span style={{
-                    fontWeight: 'bold',
-                    color: node.winnerVote === opt.letter
-                      ? VOTE_COLORS[opt.letter] || '#333'
-                      : '#999',
-                    minWidth: '12px',
-                  }}>
+                  <span
+                    onClick={opt.letter.startsWith('S') && onOptionClick ? (e) => {
+                      e.stopPropagation();
+                      onOptionClick(node, opt.letter);
+                    } : undefined}
+                    title={opt.letter.startsWith('S') ? 'Клик — подсветить трассу' : undefined}
+                    style={{
+                      fontWeight: 'bold',
+                      color: node.winnerVote === opt.letter
+                        ? VOTE_COLORS[opt.letter] || '#333'
+                        : activeTraceLetter === opt.letter
+                          ? '#e67e22'
+                          : '#999',
+                      minWidth: '12px',
+                      cursor: opt.letter.startsWith('S') && onOptionClick ? 'pointer' : undefined,
+                      textShadow: activeTraceLetter === opt.letter ? '0 0 6px rgba(230,126,34,0.8)' : undefined,
+                    }}>
                     {opt.letter}:
                   </span>
                   <span style={{
