@@ -217,6 +217,46 @@ export const Tree: React.FC<TreeProps> = ({
 
   const clearTrace = useCallback(() => setActiveTrace(null), []);
 
+  // Path highlight: when a node is selected, highlight every edge on its full
+  // lineage — all ancestor edges (up to the root) and all descendant edges
+  // (down to leaves). Suppressed while a point-trace (S-badge) is active.
+  const pathEdgeIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!selectedNodeId || activeTrace) return ids;
+    const byChild = new Map<string, string>();   // child -> parent edge id
+    const childrenOf = new Map<string, string[]>();
+    for (const c of parentConnections) {
+      byChild.set(c.to, c.id);
+      if (!childrenOf.has(c.from)) childrenOf.set(c.from, []);
+      childrenOf.get(c.from)!.push(c.to);
+    }
+    // ancestors
+    let cur = selectedNodeId;
+    const seenUp = new Set<string>([cur]);
+    while (byChild.has(cur)) {
+      ids.add(byChild.get(cur)!);
+      const parent = parentConnections.find(c => c.to === cur)!.from;
+      if (seenUp.has(parent)) break;
+      seenUp.add(parent);
+      cur = parent;
+    }
+    // descendants (BFS)
+    const queue = [selectedNodeId];
+    const seenDown = new Set<string>([selectedNodeId]);
+    while (queue.length > 0) {
+      const nid = queue.shift()!;
+      for (const child of childrenOf.get(nid) || []) {
+        if (seenDown.has(child)) continue;
+        seenDown.add(child);
+        for (const c of parentConnections) {
+          if (c.from === nid && c.to === child) ids.add(c.id);
+        }
+        queue.push(child);
+      }
+    }
+    return ids;
+  }, [selectedNodeId, activeTrace, parentConnections]);
+
   const handleContainerClick = useCallback((e: React.MouseEvent) => {
     if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains(styles.connectionLayer)) {
       setSelectedNodeId(null);
@@ -686,6 +726,7 @@ export const Tree: React.FC<TreeProps> = ({
                   allNodes={nodes}
                   isSelected={selectedConnectionId === conn.id}
                   isTrace={!!activeTrace && conn.from === activeTrace.from && conn.to === activeTrace.to}
+                  isPath={pathEdgeIds.has(conn.id)}
                   onClick={handleConnectionClick}
                   onDelete={handleDeleteConnection}
                 />

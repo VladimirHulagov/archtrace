@@ -26,6 +26,7 @@ interface ConnectionProps {
   bendY?: number;
   allNodes?: TreeNode[];
   isTrace?: boolean; // symptom trace highlight (S1 -> addressee)
+  isPath?: boolean;  // node-selection path highlight (root→leaves lineage)
 }
 
 /**
@@ -228,6 +229,7 @@ export const Connection: React.FC<ConnectionProps> = ({
   bendY,
   allNodes,
   isTrace,
+  isPath,
 }) => {
   const pathRef = useRef<SVGPathElement>(null);
   const [isHovered, setIsHovered] = React.useState(false);
@@ -284,7 +286,7 @@ export const Connection: React.FC<ConnectionProps> = ({
       <path
         ref={pathRef}
         d={pathData}
-        className={`${styles.connection} ${crossRefClass} ${isSelected ? styles['connection--selected'] : ''} ${isTrace ? styles['connection--trace'] : ''}`}
+        className={`${styles.connection} ${crossRefClass} ${isSelected ? styles['connection--selected'] : ''} ${isPath ? styles['connection--path'] : ''} ${isTrace ? styles['connection--trace'] : ''}`}
         onClick={handleClick}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}

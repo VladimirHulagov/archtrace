@@ -188,6 +188,12 @@
   stroke-width: 3px;
 }
 
+/* Node-selection path highlight: muted amber lineage (root→leaves) */
+.connection--path {
+  stroke: rgba(230, 126, 34, 0.55);
+  stroke-width: 3px;
+}
+
 /* Symptom trace highlight: orange, thicker, on top of plain edges */
 .connection--trace {
   stroke: #e67e22;
