@@ -189,15 +189,31 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
               lineHeight: '1.3',
               color: '#666',
             }}>
-              {node.options.map(opt => (
-                <li key={opt.letter} style={{ display: 'flex', gap: '4px', padding: '1px 0' }}>
-                  <span
-                    onClick={opt.letter.startsWith('S') && onOptionClick ? (e) => {
+              {node.options.map(opt => {
+                const isSymptom = opt.letter.startsWith('S');
+                const clickable = isSymptom && !!onOptionClick;
+                const liStyle: React.CSSProperties = {
+                  display: 'flex', gap: '4px',
+                  padding: '2px 4px', margin: '0 -4px',
+                  borderRadius: '4px',
+                };
+                if (clickable) {
+                  liStyle.cursor = 'pointer';
+                  if (activeTraceLetter === opt.letter) {
+                    liStyle.background = 'rgba(230, 126, 34, 0.12)';
+                  }
+                }
+                return (
+                  <li
+                    key={opt.letter}
+                    style={liStyle}
+                    onClick={clickable ? (e) => {
                       e.stopPropagation();
                       onOptionClick(node, opt.letter);
                     } : undefined}
-                    title={opt.letter.startsWith('S') ? 'Клик — подсветить трассу' : undefined}
-                    style={{
+                    title={clickable ? 'Клик — подсветить трассу' : undefined}
+                  >
+                    <span style={{
                       fontWeight: 'bold',
                       color: node.winnerVote === opt.letter
                         ? VOTE_COLORS[opt.letter] || '#333'
@@ -205,26 +221,26 @@ export const TreeNodeComponent: React.FC<TreeNodeProps> = ({
                           ? '#e67e22'
                           : '#999',
                       minWidth: '12px',
-                      cursor: opt.letter.startsWith('S') && onOptionClick ? 'pointer' : undefined,
                       textShadow: activeTraceLetter === opt.letter ? '0 0 6px rgba(230,126,34,0.8)' : undefined,
                     }}>
-                    {opt.letter}:
-                  </span>
-                  <span style={{
-                    textDecoration: node.winnerVote && node.winnerVote !== opt.letter ? 'line-through' : 'none',
-                    opacity: node.winnerVote && node.winnerVote !== opt.letter ? 0.5 : 1,
-                    display: '-webkit-box',
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden',
-                    overflowWrap: 'break-word',
-                    flex: 1,
-                    minWidth: 0,
-                  }}>
-                    {opt.title}
-                  </span>
-                </li>
-              ))}
+                      {opt.letter}:
+                    </span>
+                    <span style={{
+                      textDecoration: node.winnerVote && node.winnerVote !== opt.letter ? 'line-through' : 'none',
+                      opacity: node.winnerVote && node.winnerVote !== opt.letter ? 0.5 : 1,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                      overflowWrap: 'break-word',
+                      flex: 1,
+                      minWidth: 0,
+                    }}>
+                      {opt.title}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
 
