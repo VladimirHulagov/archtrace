@@ -25,6 +25,9 @@ interface AnalysisContext {
   parentBody?: string;
   childrenTitles: string[];
   options: { letter: string; title: string }[];
+  // Fitness-function context (MADR skill): symptom addressees + cross-ref neighbors
+  symptomTargets?: { letter: string; text: string; targetId: string; targetTitle: string }[];
+  crossRefNodes?: { id: string; title: string; body: string }[];
 }
 
 interface AnalysisResult {
@@ -100,13 +103,30 @@ function buildPhasePrompt(ctx: AnalysisContext): string {
 function buildProblemPrompt(ctx: AnalysisContext): string {
   let p = `Проанализируй следующую постановку проблемы на концептуальном уровне.\n\n`;
   p += `## Проблема\n\n**${ctx.adrTitle}**\n\n${ctx.adrBody}\n\n`;
+
+  // Fitness-function inputs: where this problem's symptoms point
+  if (ctx.symptomTargets && ctx.symptomTargets.length > 0) {
+    p += `## Куда указывают симптомы этой проблемы\n\n`;
+    for (const st of ctx.symptomTargets) {
+      p += `- ${st.letter}: ${st.text} → **ADR-${st.targetId}: ${st.targetTitle}**\n`;
+    }
+    p += `\n`;
+  }
+
   p += `## Задача анализа\n\n`;
   p += `1. **Существует ли проблема реально?** — Оцени, является ли описанная проблема действительной. Возможно, это не проблема, а уже известное решение?\n`;
   p += `2. **Есть ли готовые решения?** — Укажи, существуют ли уже известные подходы или продукты, решающие эту проблему.\n`;
   p += `3. **Масштаб и значимость** — Насколько проблема критична? Что будет, если её не решать?\n`;
   p += `4. **Альтернативы** — Предложи 2-3 альтернативных формулировки проблемы или подхода к её решению.\n\n`;
+  if (ctx.symptomTargets && ctx.symptomTargets.length > 0) {
+    p += `5. **Сверка с адресатами симптомов** (fitness check): Для каждого симптома проверь узел-адресат — отвечает ли он на этот симптом, покрывает ли его. Отметь:\n`;
+    p += `   - ПОКРЫТ: адресат отвечает на симптом;\n`;
+    p += `   - ЧАСТИЧНО: отвечает не на всё — чего не хватает;\n`;
+    p += `   - НЕ ПОКРЫТ: адресат не отвечает на симптом (неверная трассировка или пробел в дереве).\n`;
+    p += `   Результат — таблица «Симптом → Адресат → Вердикт», ниже — выводы.\n\n`;
+  }
   p += `В конце ответа добавь секцию "## Альтернативы" со списком предложенных вариантов (если есть).\n`;
-  p += `Формат — краткий markdown. Максимум 300 слов.`;
+  p += `Формат — краткий markdown. Максимум 450 слов.`;
   return p;
 }
 
@@ -153,6 +173,21 @@ function buildAdrPrompt(ctx: AnalysisContext): string {
     prompt += `## Дочерние решения\n\n${ctx.childrenTitles.map(t => `- ${t}`).join('\n')}\n\n`;
   }
 
+  // Fitness-function inputs: symptom traces and cross-referenced decisions
+  if (ctx.symptomTargets && ctx.symptomTargets.length > 0) {
+    prompt += `## Куда указывают симптомы этого узла\n\n`;
+    for (const st of ctx.symptomTargets) {
+      prompt += `- ${st.letter}: ${st.text} → **ADR-${st.targetId}: ${st.targetTitle}**\n`;
+    }
+    prompt += `\n`;
+  }
+  if (ctx.crossRefNodes && ctx.crossRefNodes.length > 0) {
+    prompt += `## Связанные решения (cross-ref)\n\n`;
+    for (const cr of ctx.crossRefNodes) {
+      prompt += `### ADR-${cr.id}: ${cr.title}\n\n${cr.body || '(нет тела)'}\n\n`;
+    }
+  }
+
   if (ctx.options.length > 0) {
     prompt += `## Варианты\n\n${ctx.options.map(o => `- Вариант ${o.letter}: ${o.title}`).join('\n')}\n\n`;
   }
@@ -163,8 +198,15 @@ function buildAdrPrompt(ctx: AnalysisContext): string {
   prompt += `2. **Противоречия**: Есть ли концептуальные противоречия с родительским требованием или дочерними решениями?\n`;
   prompt += `3. **Пробелы**: Какие архитектурные аспекты упущены? Какие критические вопросы не рассмотрены?\n`;
   prompt += `4. **Альтернативы**: Есть ли очевидные архитектурные альтернативы, не упомянутые в вариантах?\n\n`;
+  if ((ctx.symptomTargets && ctx.symptomTargets.length > 0) || (ctx.crossRefNodes && ctx.crossRefNodes.length > 0)) {
+    prompt += `5. **Сверка между решениями** (fitness check): Сопоставь каждое решение с узлами, на которые указывают его симптомы и с cross-ref соседями. Найди:\n`;
+    prompt += `   - противоречия: одно решение утверждает то, что отрицает связанное;\n`;
+    prompt += `   - пробелы: симптом указывает на узел, но в нём нет ответа на этот симптом;\n`;
+    prompt += `   - несогласованные допущения: разные узлы предполагают разное об одном и том же.\n`;
+    prompt += `   Для каждой находки указывай конкретные ADR-номера.\n\n`;
+  }
   prompt += `НЕ касайся: тестирования, QA, багов, производительности кода, UI/UX.\n\n`;
-  prompt += `Формат ответа — краткий markdown с заголовками и списками. Максимум 300 слов.`;
+  prompt += `Формат ответа — краткий markdown с заголовками и списками. Максимум 400 слов.`;
 
   return prompt;
 }

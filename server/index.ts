@@ -1435,6 +1435,24 @@ app.post('/api/decisions/:id/analyze', requireAuth, async (req, res) => {
         }
         const children = graph.nodes.filter(n => n.parent === node.id);
 
+        // Fitness-function inputs (MADR skill): where symptoms point + cross-ref bodies.
+        // Symptom addressee convention: "(→ 002, ...)" / "(→ 013)" / "(-> 013)" in S-items.
+        const symptomTargets: { letter: string; text: string; targetId: string; targetTitle: string }[] = [];
+        if (node.type === 'problem') {
+          const byId = new Map(graph.nodes.map(n => [n.id, n]));
+          (node.options || []).forEach(o => {
+            const m = o.title.match(/[(→]->?\s*(\d{2,4})/) || o.title.match(/[(]→\s*(\d{2,4})/);
+            const tid = m ? m[1] : null;
+            if (tid && byId.has(tid)) {
+              symptomTargets.push({ letter: o.letter, text: o.title.replace(/[(][^)]*[)]\s*$/, '').trim(), targetId: tid, targetTitle: byId.get(tid)!.title });
+            }
+          });
+        }
+        const crossRefNodes = (node.cross_refs || [])
+          .map(id => graph.nodes.find(n => n.id === id))
+          .filter((n): n is NonNullable<typeof n> => !!n)
+          .map(n => ({ id: n.id, title: n.title, body: n.body }));
+
         const result = await runArchitecturalAnalysis({
           adrId: node.id,
           adrTitle: node.title,
@@ -1443,6 +1461,8 @@ app.post('/api/decisions/:id/analyze', requireAuth, async (req, res) => {
           parentTitle, parentBody,
           childrenTitles: children.map(c => c.title),
           options: node.options || [],
+          symptomTargets,
+          crossRefNodes,
         });
 
         await saveAnalysis(node.id, projectId, result.analysis, result.model);
