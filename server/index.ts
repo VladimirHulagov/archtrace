@@ -1349,6 +1349,8 @@ app.put('/api/decisions/:id', requireAuth, async (req, res) => {
       tradeoffs: req.body.tradeoffs !== undefined ? req.body.tradeoffs : existing.tradeoffs,
       legacy: existing.legacy,
       created: node.created,
+      decided: req.body.decided !== undefined ? req.body.decided : node.decided,
+      extra: node.extra,
     });
 
     fs.writeFileSync(filePath, md, 'utf-8');

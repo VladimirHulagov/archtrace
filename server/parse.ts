@@ -40,6 +40,49 @@ export const PHASE_INFO: Record<number, { name: string; color: string; bg: strin
 
 // ─── Types ────────────────────────────────────────────────
 
+// ─── MADR compatibility ───────────────────────────────────
+// Canonical MADR uses draft/adopted; archtrace enum differs — normalize on ingest.
+const STATUS_ALIASES: Record<string, string> = {
+  draft: 'proposed',
+  proposed: 'proposed',
+  debating: 'debating',
+  discussion: 'debating',
+  accepted: 'accepted',
+  adopted: 'accepted',
+  decided: 'accepted',
+  rejected: 'rejected',
+  superseded: 'superseded',
+};
+
+/** Normalize a frontmatter status (string or MADR v2 object) into
+ *  archtrace status + optional superseded-by target + decided date. */
+export function normalizeStatus(raw: any): { status: DecisionNode['status']; supersededBy: string | null; decided: string | null; extra: Record<string, any> } {
+  const extra: Record<string, any> = {};
+  if (raw && typeof raw === 'object') {
+    // MADR v2: status: { date, deciders }
+    if (raw.date) extra['deciders_date'] = String(raw.date);
+    if (raw.deciders) extra['deciders'] = raw.deciders;
+    return { status: 'proposed', supersededBy: null, decided: raw.date ? String(raw.date) : null, extra };
+  }
+  const s = String(raw ?? '').trim();
+  const by = s.match(/superseded\s+by\s+([\w-]+)/i);
+  if (by) return { status: 'superseded', supersededBy: by[1], decided: null, extra };
+  const key = s.toLowerCase();
+  return { status: (STATUS_ALIASES[key] || 'proposed') as DecisionNode['status'], supersededBy: null, decided: null, extra };
+}
+
+/** Extract the first `# H1` title from a MADR body (canonical MADR has no
+ *  title frontmatter — the H1 IS the title). Comment-only H1s yield ''. */
+export function extractH1Title(body: string): string {
+  const m = body.match(/^#\s+(.+)$/m);
+  if (!m) return '';
+  return m[1].replace(/<!--[\s\S]*?-->/g, '').trim();
+}
+
+function stripCommentPlaceholders(s: string): string {
+  return s.replace(/<!--[\s\S]*?-->/g, '').trim();
+}
+
 export interface Voter {
   name: string;
   role: string;
@@ -59,7 +102,8 @@ export interface DecisionNode {
   created: string;
   decided: string | null;
   voters: Voter[];
-  options: { letter: string; title: string }[];
+  options: { letter: string; title: string; description?: string }[];
+  extra: Record<string, any>; // unknown frontmatter keys (MADR passthrough: tags, decision-makers, ...)
   body: string;        // markdown body (without frontmatter)
   file: string;        // source filename
 }
@@ -110,8 +154,8 @@ function parseSimpleYAML(text: string): Record<string, any> {
       continue;
     }
 
-    // Key-value pair
-    const kvMatch = trimmed.match(/^(\w+):\s*(.*)$/);
+    // Key-value pair (hyphens allowed: MADR 'decision-makers' etc.)
+    const kvMatch = trimmed.match(/^([\w-]+):\s*(.*)$/);
     if (kvMatch) {
       const key = kvMatch[1];
       let value = kvMatch[2].trim();
@@ -124,6 +168,13 @@ function parseSimpleYAML(text: string): Record<string, any> {
           const arr = parseYAMLArray(lines, i + 1);
           result[key] = arr.value;
           i = arr.nextLine;
+          continue;
+        }
+        // Nested object (MADR v2: status: { date, deciders })
+        const nested = parseYAMLNestedObject(lines, i + 1);
+        if (nested) {
+          result[key] = nested.value;
+          i = nested.nextLine;
           continue;
         }
         result[key] = null;
@@ -258,6 +309,33 @@ function parseYAMLArray(lines: string[], startIdx: number): { value: any[]; next
 
 // ─── Graph builder ────────────────────────────────────────
 
+/**
+ * Parse an indented key: value block (MADR v2 nests date/deciders under status).
+ * Returns null if the first line isn't an indented key (then it's a plain null).
+ */
+function parseYAMLNestedObject(lines: string[], startIdx: number): { value: Record<string, any>; nextLine: number } | null {
+  const obj: Record<string, any> = {};
+  let i = startIdx;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.match(/^\s+-\s/)) break;
+    const m = line.match(/^\s+([\w-]+):\s*(.*)$/);
+    if (!m) break;
+    let v = m[2].trim();
+    const fq = (v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"));
+    if (fq) {
+      v = v.slice(1, -1);
+      obj[m[1]] = v;
+    } else if (v === '' || v === 'null' || v === '~') {
+      obj[m[1]] = null;
+    } else {
+      obj[m[1]] = parseScalarValue(v);
+    }
+    i++;
+  }
+  return i > startIdx ? { value: obj, nextLine: i } : null;
+}
+
 const DECISIONS_DIR = path.resolve(process.cwd(), 'decisions');
 
 
@@ -265,21 +343,76 @@ const DECISIONS_DIR = path.resolve(process.cwd(), 'decisions');
  * Parse option names from markdown body.
  * Matches: ### Option A: Title  OR  ### A: Title  OR  ## A: Title
  */
-function parseOptions(body: string): { letter: string; title: string }[] {
-  const options: { letter: string; title: string }[] = [];
+function parseOptions(body: string): { letter: string; title: string; description?: string }[] {
+  const options: { letter: string; title: string; description: string[] }[] = [];
   const lines = body.split('\n');
+  let current: { letter: string; title: string; description: string[] } | null = null;
   for (const line of lines) {
     // Match: ### Option A: ... or ### A: ... (but not ### Context, ### Decision, etc.)
     const m = line.match(/^#{2,3}\s+(?:Option\s+)?([A-Z])\s*[:.·]\s*(.+)/i);
+    let matched = false;
     if (m) {
       const letter = m[1].toUpperCase();
       const title = m[2].trim();
       // Filter out false positives (Context, Requirement, etc.)
       if (title.length > 2 && !['Context', 'Decision', 'Requirement', 'Consequences', 'Options'].includes(title)) {
         if (!options.find(o => o.letter === letter)) {
-          options.push({ letter, title });
+          current = { letter, title, description: [] };
+          options.push(current);
+          matched = true;
         }
       }
+    }
+    // Collect body lines after the option header as its description;
+    // stop at the next section header (## ...) so decision/consequences
+    // sections are never swallowed into the last option.
+    if (current && !matched && !/^##\s/.test(line)) {
+      current.description.push(line);
+    }
+  }
+  return options.map(o => {
+    const desc = o.description.join('\n').trim();
+    return desc ? { letter: o.letter, title: o.title, description: desc } : { letter: o.letter, title: o.title };
+  });
+}
+
+/**
+ * MADR fallback: parse bulleted options under '## Considered Options'
+ * (canonical MADR has no '### Option A:' headers) → letters A, B, C, ...
+ * Pros/Cons blocks ('## Pros and Cons of the Options' → '### <option title>'
+ * → bullet lines) are attached as the option description.
+ */
+export function parseMadrOptions(body: string): { letter: string; title: string; description?: string }[] {
+  const m = body.match(/^##\s+Considered Options\s*$/im);
+  if (!m) return [];
+  const rest = body.slice(m.index! + m[0].length);
+  const section = rest.split(/^##\s+/m)[0];
+  const options: { letter: string; title: string; description?: string }[] = [];
+  for (const line of section.split('\n')) {
+    const t = line.trim();
+    const lm = t.match(/^[-*]\s+(.+)$/) || t.match(/^\d+[.)]\s+(.+)$/);
+    if (lm) {
+      const title = stripCommentPlaceholders(lm[1]);
+      if (title && !options.find(o => o.title.toLowerCase() === title.toLowerCase())) {
+        options.push({ letter: String.fromCharCode(65 + options.length), title });
+      }
+    }
+  }
+  // Attach Pros/Cons as descriptions
+  const pc = body.match(/^##\s+Pros and Cons of the Options\s*$/im);
+  if (pc) {
+    const pcBody = body.slice(pc.index! + pc[0].length);
+    const chunks = pcBody.split(/^###\s+/m).slice(1);
+    for (const chunk of chunks) {
+      const lines = chunk.split('\n');
+      const title = stripCommentPlaceholders(lines[0] || '');
+      const bullets = lines.slice(1)
+        .map(l => l.trim())
+        .filter(l => /^[-*]\s+/.test(l))
+        .map(l => l.replace(/^[-*]\s+/, '').trim())
+        .filter(b => stripCommentPlaceholders(b));
+      const opt = options.find(o => o.title.toLowerCase() === title.toLowerCase());
+      if (opt && bullets.length > 0) opt.description = bullets.join('\n');
     }
   }
   return options;
@@ -316,23 +449,51 @@ function parseSymptomItems(body: string): { letter: string; title: string }[] {
   return parseSectionItemsAsOptions(body, 'Симптомы и факты', 'S');
 }
 
+// Frontmatter keys owned by archtrace — everything else passes through as `extra`
+const KNOWN_FRONTMATTER_KEYS = new Set(['id', 'title', 'status', 'type', 'phase', 'parent', 'cross_refs', 'created', 'decided', 'voters']);
+
 export function parseDecisionFile(filePath: string): DecisionNode | null {
   const raw = fs.readFileSync(filePath, 'utf-8');
   const { frontmatter, body } = parseFrontmatter(raw);
 
   const rawType = frontmatter.type || 'decision';
   const rawPhase = frontmatter.phase;
-  const parsedOptions = parseOptions(body);
+  const classicOptions = parseOptions(body);
+  const parsedOptions = classicOptions.length > 0
+    ? classicOptions
+    : parseMadrOptions(body);
+
+  // MADR status normalization: adopted→accepted, draft→proposed,
+  // 'superseded by NNN'→superseded + implicit cross-ref to the successor
+  const norm = normalizeStatus(frontmatter.status);
+  const crossRefs: string[] = frontmatter.cross_refs || [];
+  if (norm.supersededBy && !crossRefs.includes(norm.supersededBy)) {
+    crossRefs.push(norm.supersededBy);
+  }
+
+  // Unknown frontmatter keys survive round-trips (MADR: tags, decision-makers, ...)
+  const extra: Record<string, any> = {};
+  for (const [k, v] of Object.entries(frontmatter)) {
+    if (!KNOWN_FRONTMATTER_KEYS.has(k)) extra[k] = v;
+  }
+  for (const [k, v] of Object.entries(norm.extra)) extra[k] = v;
+
+  // Canonical MADR: title lives in the body H1, not in frontmatter
+  const title = frontmatter.title || extractH1Title(body);
+
+  // MADR v3 flat `date:` = decision date → decided (+ created fallback)
+  const flatDate = typeof extra['date'] === 'string' && /^\d{4}-\d{2}-\d{2}/.test(extra['date']) ? extra['date'] : null;
+
   return {
     id: frontmatter.id || path.basename(filePath, '.md'),
-    title: frontmatter.title || 'Untitled',
-    status: frontmatter.status || 'proposed',
+    title: title || 'Untitled',
+    status: norm.status,
     type: rawType,
     phase: rawPhase ? (parseInt(String(rawPhase), 10) as 1|2|3|4) : typeToPhase(rawType),
     parent: frontmatter.parent ?? null,
-    cross_refs: frontmatter.cross_refs || [],
-    created: frontmatter.created || new Date().toISOString().split('T')[0],
-    decided: frontmatter.decided ?? null,
+    cross_refs: crossRefs,
+    created: frontmatter.created || flatDate || new Date().toISOString().split('T')[0],
+    decided: frontmatter.decided ?? norm.decided ?? flatDate,
     voters: frontmatter.voters || [],
     options: parsedOptions.length > 0
       ? parsedOptions
@@ -341,6 +502,7 @@ export function parseDecisionFile(filePath: string): DecisionNode | null {
         : rawType === 'problem'
           ? parseSymptomItems(body)
           : [],
+    extra,
     body: body.trim(),
     file: path.basename(filePath),
   };
@@ -472,18 +634,35 @@ const SECTION_ALIASES: Record<string, keyof BodySections> = {
   'подходы': 'approaches', 'approaches': 'approaches',
   'трейд-оффы': 'tradeoffs', 'trade-offs': 'tradeoffs', 'tradeoffs': 'tradeoffs',
   'перенесено': 'legacy',
+  // Canonical MADR (EN) headers — ingest compatibility
+  'context and problem statement': 'context',
+  'decision drivers': 'symptoms',
+  'considered options': 'options',
+  'pros and cons of the options': 'options',
+  'decision outcome': 'decision',
+  'confirmation': 'legacy',
+  'more information': 'legacy',
+  'links': 'legacy',
 };
 
 export function parseBodySections(body: string): BodySections {
   const sections = emptySections();
   const headerRegex = /^## (.+)$/gm;
-  const matches: { title: string; start: number; end: number }[] = [];
+  const matches: { title: string; start: number; headerStart: number; end: number }[] = [];
   let m: RegExpExecArray | null;
   while ((m = headerRegex.exec(body)) !== null) {
-    matches.push({ title: m[1].trim().toLowerCase(), start: m.index + m[0].length, end: body.length });
+    matches.push({ title: m[1].trim().toLowerCase(), headerStart: m.index, start: m.index + m[0].length, end: body.length });
   }
   for (let i = 0; i < matches.length; i++) {
-    matches[i].end = i + 1 < matches.length ? matches[i + 1].start - matches[i + 1].title.length - 3 : body.length;
+    matches[i].end = i + 1 < matches.length ? matches[i + 1].headerStart : body.length;
+  }
+  // Preamble before the first '##' (e.g. MADR `# Title` H1) — keep in legacy
+  // so it survives regenerate-on-PUT instead of being silently dropped.
+  if (matches.length > 0 && matches[0].headerStart > 0) {
+    const preamble = body.slice(0, matches[0].headerStart).trim();
+    if (preamble) {
+      sections.legacy += (sections.legacy ? '\n\n' : '') + preamble;
+    }
   }
   for (const match of matches) {
     const content = body.substring(match.start, match.end).trim();
@@ -493,7 +672,13 @@ export function parseBodySections(body: string): BodySections {
       // legacy files sometimes used '## Требование' as context header — don't overwrite real context
       sections.legacy += (sections.legacy ? '\n\n' : '') + `## ${match.title}\n\n${content}`;
     } else if (key) {
-      (sections as any)[key] = content;
+      if ((sections as any)[key]) {
+        // MADR: 'Considered Options' + 'Pros and Cons of the Options' both → options.
+        // Append instead of overwriting so nothing is lost.
+        (sections as any)[key] += '\n\n' + content;
+      } else {
+        (sections as any)[key] = content;
+      }
     } else {
       // Unknown section — preserve it in legacy so no data is lost on rewrite
       sections.legacy += (sections.legacy ? '\n\n' : '') + `## ${match.title}\n\n${content}`;
@@ -526,6 +711,8 @@ export interface AdrInput {
   tradeoffs?: string;
   legacy?: string;
   created?: string;
+  decided?: string | null;
+  extra?: Record<string, any>; // unknown frontmatter passthrough (MADR: tags, decision-makers, ...)
 }
 
 export function generateAdrMarkdown(input: AdrInput): { filename: string; content: string } {
@@ -544,6 +731,14 @@ export function generateAdrMarkdown(input: AdrInput): { filename: string; conten
   fm += `parent: ${parent === 'null' ? 'null' : `"${parent}"`}\n`;
   fm += `cross_refs: ${input.cross_refs?.length ? JSON.stringify(input.cross_refs).replace(/\[|\]|"/g, m => m === '[' ? '[' : m === ']' ? ']' : '"') : '[]'}\n`;
   fm += `created: ${created}\n`;
+  if (input.decided) fm += `decided: ${input.decided}\n`;
+  if (input.extra) {
+    for (const [k, v] of Object.entries(input.extra)) {
+      if (v === undefined || v === null || v === '') continue;
+      const serialized = typeof v === 'string' && /^[\w./:+ -]+$/.test(v) ? v : JSON.stringify(v);
+      fm += `${k}: ${serialized}\n`;
+    }
+  }
   fm += `---\n\n`;
 
   // Build body — sections depend on node type
