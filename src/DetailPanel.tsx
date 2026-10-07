@@ -1384,8 +1384,11 @@ interface AdrSections {
 
 const SECTION_KEYS: Record<string, keyof AdrSections> = {
   'контекст': 'context', 'контекста': 'context', 'context': 'context',
+  'context and problem statement': 'context',
   'опции': 'options', 'options': 'options', 'варианты': 'options',
+  'considered options': 'options', 'pros and cons of the options': 'options',
   'решение': 'decision', 'decision': 'decision',
+  'decision outcome': 'decision',
   'последствия': 'consequences', 'consequences': 'consequences',
   'симптомы и факты': 'symptoms', 'симптомы': 'symptoms', 'symptoms': 'symptoms',
   'критерии актуальности': 'relevance', 'актуальность': 'relevance', 'relevance': 'relevance',
@@ -1414,6 +1417,20 @@ function parseAdrBody(body: string): AdrSections {
     const key = SECTION_KEYS[match.title];
     if (key === 'context' && sections.context) {
       sections.legacy += (sections.legacy ? '\n\n' : '') + `## ${match.title}\n\n${content}`;
+    } else if (key === 'decision' && /^### Consequences\s*$/m.test(content)) {
+      // Canonical MADR nests `### Consequences` (and possibly `### Confirmation`)
+      // INSIDE `## Decision Outcome` — split them apart.
+      const idx = content.search(/^### Consequences\s*$/m);
+      const decisionPart = content.slice(0, idx).trim();
+      sections.decision = sections.decision ? sections.decision + '\n\n' + decisionPart : decisionPart;
+      const after = content.slice(idx).replace(/^### Consequences\s*\n/, '');
+      const nextH3 = after.search(/^###\s/m);
+      if (nextH3 >= 0) {
+        sections.consequences = after.slice(0, nextH3).trim();
+        sections.legacy += (sections.legacy ? '\n\n' : '') + after.slice(nextH3).trim();
+      } else {
+        sections.consequences = after.trim();
+      }
     } else if (key) {
       sections[key] = content;
     } else {
