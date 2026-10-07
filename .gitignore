@@ -40,3 +40,4 @@ Thumbs.db
 
 # Opencode / Superpowers local workspace
 .superpowers
+*.tsbuildinfo
