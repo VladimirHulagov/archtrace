@@ -363,10 +363,13 @@ function parseOptions(body: string): { letter: string; title: string; descriptio
         }
       }
     }
-    // Collect body lines after the option header as its description;
-    // stop at the next section header (## ...) so decision/consequences
-    // sections are never swallowed into the last option.
-    if (current && !matched && !/^##\s/.test(line)) {
+    // Collect body lines after the option header as its description.
+    // A `##` section header CLOSES the current option: only the header line
+    // itself is skipped — content after `## Решение` / `## Последствия`
+    // must never be swallowed into the last option's description.
+    if (current && !matched && /^##\s/.test(line)) {
+      current = null;
+    } else if (current && !matched) {
       current.description.push(line);
     }
   }
@@ -645,6 +648,51 @@ const SECTION_ALIASES: Record<string, keyof BodySections> = {
   'links': 'legacy',
 };
 
+/** Normalized-content key for section dedupe (collapse whitespace). */
+function sectionKey(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/** True when `content` (or every line of it) is already present in `existing`. */
+function sectionContains(existing: string, content: string): boolean {
+  if (!existing) return false;
+  const ke = sectionKey(existing);
+  const kc = sectionKey(content);
+  if (!kc) return true;
+  if (ke.includes(kc)) return true;
+  // Line-wise: every non-empty line of content already in existing
+  const lines = kc.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  if (lines.length > 0 && lines.every(l => ke.includes(l))) return true;
+  return false;
+}
+
+/** Append content to a section field unless it's already there (dedupe). */
+function mergeSection(target: { value: string }, content: string): void {
+  if (!content.trim()) return;
+  if (sectionContains(target.value, content)) return;
+  target.value = target.value ? target.value + '\n\n' + content : content;
+}
+
+/** Split `## Decision Outcome` content into decision text, nested
+ * `### Consequences` body and trailing H3 blocks (`### Confirmation`, ...). */
+function splitOutcomeSection(content: string): { decision: string; consequences: string; rest: string } {
+  const consIdx = content.search(/^### Consequences\s*$/m);
+  if (consIdx >= 0) {
+    const decision = content.slice(0, consIdx).trim();
+    const after = content.slice(consIdx).replace(/^### Consequences\s*\n/, '');
+    const confIdx = after.search(/^### Confirmation\s*$/m);
+    if (confIdx >= 0) {
+      return { decision, consequences: after.slice(0, confIdx).trim(), rest: after.slice(confIdx).trim() };
+    }
+    return { decision, consequences: after.trim(), rest: '' };
+  }
+  const confIdx = content.search(/^### Confirmation\s*$/m);
+  if (confIdx >= 0) {
+    return { decision: content.slice(0, confIdx).trim(), consequences: '', rest: content.slice(confIdx).trim() };
+  }
+  return { decision: content.trim(), consequences: '', rest: '' };
+}
+
 export function parseBodySections(body: string): BodySections {
   const sections = emptySections();
   const headerRegex = /^## (.+)$/gm;
@@ -656,12 +704,16 @@ export function parseBodySections(body: string): BodySections {
   for (let i = 0; i < matches.length; i++) {
     matches[i].end = i + 1 < matches.length ? matches[i + 1].headerStart : body.length;
   }
-  // Preamble before the first '##' (e.g. MADR `# Title` H1) — keep in legacy
-  // so it survives regenerate-on-PUT instead of being silently dropped.
+  // Preamble before the first '##': canonical MADR bodies start with `# Title`.
+  // The H1 IS the title (extracted separately) — don't duplicate it into legacy.
+  // Any non-H1 preamble content (intro text) is preserved via legacy.
   if (matches.length > 0 && matches[0].headerStart > 0) {
     const preamble = body.slice(0, matches[0].headerStart).trim();
     if (preamble) {
-      sections.legacy += (sections.legacy ? '\n\n' : '') + preamble;
+      const stripped = preamble.replace(/^#\s+.+\n?/, '').trim();
+      if (stripped) {
+        sections.legacy += (sections.legacy ? '\n\n' : '') + stripped;
+      }
     }
   }
   for (const match of matches) {
@@ -670,18 +722,28 @@ export function parseBodySections(body: string): BodySections {
     const key = SECTION_ALIASES[match.title];
     if (key === 'context' && sections.context) {
       // legacy files sometimes used '## Требование' as context header — don't overwrite real context
-      sections.legacy += (sections.legacy ? '\n\n' : '') + `## ${match.title}\n\n${content}`;
-    } else if (key) {
-      if ((sections as any)[key]) {
-        // MADR: 'Considered Options' + 'Pros and Cons of the Options' both → options.
-        // Append instead of overwriting so nothing is lost.
-        (sections as any)[key] += '\n\n' + content;
-      } else {
-        (sections as any)[key] = content;
+      if (!sectionContains(sections.legacy, content)) {
+        sections.legacy += (sections.legacy ? '\n\n' : '') + `## ${match.title}\n\n${content}`;
       }
+    } else if (key === 'decision') {
+      // Canonical MADR nests `### Consequences` and `### Confirmation` INSIDE
+      // ## Decision Outcome — split them into their own fields / legacy.
+      const parts = splitOutcomeSection(content);
+      mergeSection({ get value() { return (sections as any).decision; }, set value(v: string) { (sections as any).decision = v; } }, parts.decision);
+      mergeSection({ get value() { return (sections as any).consequences; }, set value(v: string) { (sections as any).consequences = v; } }, parts.consequences);
+      if (parts.rest && !sectionContains(sections.legacy, parts.rest)) {
+        sections.legacy += (sections.legacy ? '\n\n' : '') + parts.rest;
+      }
+    } else if (key) {
+      mergeSection(
+        { get value() { return (sections as any)[key]; }, set value(v: string) { (sections as any)[key] = v; } },
+        content,
+      );
     } else {
       // Unknown section — preserve it in legacy so no data is lost on rewrite
-      sections.legacy += (sections.legacy ? '\n\n' : '') + `## ${match.title}\n\n${content}`;
+      if (!sectionContains(sections.legacy, `## ${match.title}\n\n${content}`) && !sectionContains(sections.legacy, content)) {
+        sections.legacy += (sections.legacy ? '\n\n' : '') + `## ${match.title}\n\n${content}`;
+      }
     }
   }
   return sections;
@@ -712,7 +774,25 @@ export interface AdrInput {
   legacy?: string;
   created?: string;
   decided?: string | null;
+  voters?: { name: string; role?: string; vote?: string; weight?: number; rationale?: string }[];
   extra?: Record<string, any>; // unknown frontmatter passthrough (MADR: tags, decision-makers, ...)
+}
+
+/** Canonical MADR v3 section headers (file format). UI display stays RU. */
+const CANON_HEADERS = {
+  context: 'Context and Problem Statement',
+  drivers: 'Decision Drivers',
+  considered: 'Considered Options',
+  outcome: 'Decision Outcome',
+  proscons: 'Pros and Cons of the Options',
+  moreInfo: 'More Information',
+};
+
+/** Quote a YAML scalar only when needed (colons/specials would break `key: value`). */
+function yamlScalar(v: unknown): string {
+  if (typeof v === 'number') return String(v);
+  const str = String(v ?? '');
+  return /^[^:#\n]+$/.test(str) && str.trim() === str && str.length > 0 ? str : JSON.stringify(str);
 }
 
 export function generateAdrMarkdown(input: AdrInput): { filename: string; content: string } {
@@ -723,55 +803,90 @@ export function generateAdrMarkdown(input: AdrInput): { filename: string; conten
   const parent = input.parent || 'null';
   const created = input.created || new Date().toISOString().split('T')[0];
 
-  // Build frontmatter
-  let fm = `---\nid: "${id}"\ntitle: "${input.title.replace(/"/g, '\\"')}"\n`;
+  // ── Frontmatter: archtrace extensions + canonical MADR keys.
+  // No `title:` — canonical MADR carries the title as body H1.
+  let fm = `---\nid: "${id}"\n`;
   fm += `status: ${status}\n`;
   fm += `type: ${type}\n`;
   fm += `phase: ${phase}\n`;
   fm += `parent: ${parent === 'null' ? 'null' : `"${parent}"`}\n`;
   fm += `cross_refs: ${input.cross_refs?.length ? JSON.stringify(input.cross_refs).replace(/\[|\]|"/g, m => m === '[' ? '[' : m === ']' ? ']' : '"') : '[]'}\n`;
   fm += `created: ${created}\n`;
-  if (input.decided) fm += `decided: ${input.decided}\n`;
+  if (input.decided) fm += `date: ${input.decided}\n`;
+  if (input.voters?.length) {
+    fm += `voters:\n`;
+    for (const v of input.voters) {
+      fm += `  - name: ${yamlScalar(v.name)}\n`;
+      if (v.role) fm += `    role: ${yamlScalar(v.role)}\n`;
+      if (v.vote) fm += `    vote: ${yamlScalar(v.vote)}\n`;
+      if (v.weight !== undefined) fm += `    weight: ${v.weight}\n`;
+      if (v.rationale) fm += `    rationale: ${yamlScalar(v.rationale)}\n`;
+    }
+  }
   if (input.extra) {
     for (const [k, v] of Object.entries(input.extra)) {
       if (v === undefined || v === null || v === '') continue;
+      // Canonical names win: decided → date already emitted above.
+      if (k === 'date') continue;
       const serialized = typeof v === 'string' && /^[\w./:+ -]+$/.test(v) ? v : JSON.stringify(v);
       fm += `${k}: ${serialized}\n`;
     }
   }
   fm += `---\n\n`;
 
-  // Build body — sections depend on node type
-  let body = '';
-
-  if (input.context) {
-    body += `## Контекст\n\n${input.context}\n\n`;
-  }
+  // ── Body: canonical MADR layout (H1 title, EN headers). UI stays RU.
+  let body = `# ${input.title}\n\n`;
 
   if (type === 'problem') {
+    if (input.context) body += `## Контекст\n\n${input.context}\n\n`;
     if (input.symptoms) body += `## Симптомы и факты\n\n${input.symptoms}\n\n`;
     if (input.relevance) body += `## Критерии актуальности\n\n${input.relevance}\n\n`;
   } else if (type === 'requirement') {
+    if (input.context) body += `## Контекст\n\n${input.context}\n\n`;
     if (input.requirements) body += `## Требования\n\n${input.requirements}\n\n`;
     if (input.constraints) body += `## Ограничения\n\n${input.constraints}\n\n`;
     if (input.acceptance) body += `## Критерии приёмки\n\n${input.acceptance}\n\n`;
   } else if (type === 'paradigm') {
+    if (input.context) body += `## Контекст\n\n${input.context}\n\n`;
     if (input.approaches) body += `## Подходы\n\n${input.approaches}\n\n`;
     if (input.tradeoffs) body += `## Трейд-оффы\n\n${input.tradeoffs}\n\n`;
   } else {
-    // decision / task / legacy types — classic ADR layout
-    if (input.options?.length) {
-      body += `## Опции\n\n`;
-      for (const opt of input.options) {
-        body += `### Option ${opt.letter}: ${opt.title}\n\n`;
-        if (opt.description) body += `${opt.description}\n\n`;
-      }
+    // decision / task / legacy types — canonical MADR layout
+    if (input.context) {
+      body += `## ${CANON_HEADERS.context}\n\n${input.context}\n\n`;
     }
-    if (input.decision) {
-      body += `## Решение\n\n${input.decision}\n\n`;
+    if (input.symptoms) {
+      // MADR ingested drivers live in symptoms; keep them in canonical place.
+      body += `## ${CANON_HEADERS.drivers}\n\n${input.symptoms}\n\n`;
+    }
+    if (input.options?.length) {
+      body += `## ${CANON_HEADERS.considered}\n\n`;
+      for (const opt of input.options) {
+        body += `* ${opt.title}\n`;
+      }
+      body += `\n## ${CANON_HEADERS.outcome}\n\n`;
+      const chosen = input.decision
+        ? input.decision
+        : `Chosen option: "${input.options[0]?.title || ''}", because`;
+      body += `${chosen}\n\n`;
+    } else if (input.decision) {
+      body += `## ${CANON_HEADERS.outcome}\n\n${input.decision}\n\n`;
     }
     if (input.consequences) {
-      body += `## Последствия\n\n${input.consequences}\n\n`;
+      body += `### Consequences\n\n${input.consequences}\n\n`;
+    }
+    if (input.options?.length && input.options.some(o => o.description)) {
+      body += `## ${CANON_HEADERS.proscons}\n\n`;
+      for (const opt of input.options) {
+        if (!opt.description) continue;
+        body += `### ${opt.title}\n\n`;
+        for (const line of opt.description.split('\n')) {
+          const t = line.trim();
+          if (!t) continue;
+          body += `* ${t}\n`;
+        }
+        body += `\n`;
+      }
     }
   }
 

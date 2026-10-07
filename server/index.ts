@@ -1323,10 +1323,11 @@ app.put('/api/decisions/:id', requireAuth, async (req, res) => {
     // Parse existing body sections to preserve unmodified fields
     const existing = parseBodySections(node.body);
 
-    // Reconstruct structured options from existing node if not provided
+    // Reconstruct structured options from existing node if not provided.
+    // Keep descriptions (Pros/Cons) so regenerating the file never drops them.
     let optionsForGen = req.body.options;
     if (!optionsForGen && node.options?.length) {
-      optionsForGen = node.options.map(o => ({ letter: o.letter, title: o.title }));
+      optionsForGen = node.options.map(o => ({ letter: o.letter, title: o.title, description: o.description }));
     }
 
     const { content: md } = generateAdrMarkdown({
@@ -1350,6 +1351,7 @@ app.put('/api/decisions/:id', requireAuth, async (req, res) => {
       legacy: existing.legacy,
       created: node.created,
       decided: req.body.decided !== undefined ? req.body.decided : node.decided,
+      voters: node.voters,
       extra: node.extra,
     });
 

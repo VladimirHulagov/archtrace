@@ -132,8 +132,10 @@ describe('MADR ingest', () => {
     expect(s.options).toContain('Append-only Kafka topic');
     expect(s.options).toContain('Good, because horizontal scale'); // Pros/Cons appended, not overwritten
     expect(s.decision).toContain('Chosen option');
-    expect(s.legacy).toContain('# Use append-only event log'); // H1 preamble preserved
+    expect(s.legacy).not.toContain('# Use append-only event log'); // H1 IS the title, not duplicated
+    expect(s.legacy).toContain('### Confirmation'); // Confirmation preserved
     expect(s.legacy).toContain('See ADR-007'); // More Information preserved
+    expect(s.consequences).toContain('one datastore to back up'); // nested ### Consequences split out
   });
 
   it('bare MADR template (comment placeholders) yields Untitled + no phantom options', () => {
@@ -260,6 +262,155 @@ describe('round-trip stability', () => {
 });
 
 // ─── Units ────────────────────────────────────────────────────────────────
+
+// ─── Canonical MADR storage (phase 3): files ARE canonical MADR ──────────
+
+describe('canonical MADR storage', () => {
+  it('generator emits canonical v3 file: H1 title, EN headers, date key, no title frontmatter', () => {
+    const { filename, content } = generateAdrMarkdown({
+      id: '020',
+      title: 'Store files as canonical MADR',
+      status: 'accepted',
+      type: 'decision',
+      parent: '001',
+      cross_refs: ['021'],
+      context: 'Interop with external MADR tooling.',
+      options: [
+        { letter: 'A', title: 'Adapter export', description: '− two conversions per touch\n+ zero migration' },
+        { letter: 'B', title: 'Native storage', description: '+ tools read repo directly' },
+      ],
+      decision: 'Chosen option: "Native storage", because single source of truth.',
+      consequences: '+ any MADR tool reads the repo\n− format locked to canonical headers',
+      decided: '2026-10-07',
+      created: '2026-10-07',
+      extra: { tags: 'madr, storage' },
+    });
+    expect(filename).toBe('020-store-files-as-canonical-madr.md');
+    expect(content).toContain('\n# Store files as canonical MADR\n');
+    expect(content).not.toMatch(/^title:/m);
+    expect(content).toContain('date: 2026-10-07');
+    expect(content).toContain('## Context and Problem Statement');
+    expect(content).toContain('## Considered Options');
+    expect(content).toContain('* Adapter export');
+    expect(content).toContain('## Decision Outcome');
+    expect(content).toContain('### Consequences');
+    expect(content).toContain('## Pros and Cons of the Options');
+    // archtrace extensions stay in frontmatter
+    expect(content).toContain('parent: "001"');
+    expect(content).toContain('type: decision');
+  });
+
+  it('canonical file round-trips: title/sections/options/desc/decided all survive', () => {
+    const { content } = generateAdrMarkdown({
+      id: '021',
+      title: 'Round trip native',
+      status: 'accepted',
+      type: 'decision',
+      parent: null,
+      cross_refs: [],
+      context: 'CTX',
+      options: [
+        { letter: 'A', title: 'Alpha', description: '+ fast\n− pricey' },
+        { letter: 'B', title: 'Beta' },
+      ],
+      decision: 'Chosen option: "Alpha", because fast.',
+      consequences: '+ simple\n− slower writes',
+      decided: '2026-10-06',
+      created: '2026-10-05',
+    });
+    const p = path.join(tmpDir, '021-round-trip-native.md');
+    fs.writeFileSync(p, content, 'utf-8');
+    const node = parseDecisionFile(p)!;
+    expect(node.title).toBe('Round trip native');
+    expect(node.status).toBe('accepted');
+    expect(node.decided).toBe('2026-10-06');
+    expect(node.options.map(o => o.title)).toEqual(['Alpha', 'Beta']);
+    expect(node.options[0].description).toContain('fast');
+    expect(node.options[0].description).toContain('pricey');
+    const s = parseBodySections(node.body);
+    expect(s.context).toBe('CTX');
+    expect(s.decision).toContain('Chosen option: "Alpha"');
+    expect(s.consequences).toContain('simple');
+    // Second generation is byte-identical (idempotent storage)
+    const second = generateAdrMarkdown({
+      id: node.id,
+      title: node.title,
+      status: node.status,
+      type: node.type,
+      parent: node.parent,
+      cross_refs: node.cross_refs,
+      context: s.context,
+      options: node.options,
+      decision: s.decision,
+      consequences: s.consequences,
+      extra: node.extra,
+      created: node.created,
+      decided: node.decided,
+    });
+    expect(second.content).toBe(content);
+  });
+
+  it('voters survive canonical round-trip', () => {
+    const { content } = generateAdrMarkdown({
+      id: '022',
+      title: 'Voter persistence',
+      status: 'debating',
+      type: 'decision',
+      parent: null,
+      cross_refs: [],
+      context: 'C',
+      decision: 'D',
+      decided: '2026-10-07',
+      created: '2026-10-07',
+      voters: [
+        { name: 'Ivan', role: 'architect', vote: 'A', weight: 3, rationale: 'Proven' },
+        { name: 'Anna', role: 'senior', vote: 'B', weight: 2, rationale: 'Density' },
+      ],
+    });
+    const p = path.join(tmpDir, '022-voter-persistence.md');
+    fs.writeFileSync(p, content, 'utf-8');
+    const node = parseDecisionFile(p)!;
+    expect(node.voters).toHaveLength(2);
+    expect(node.voters[0]).toMatchObject({ name: 'Ivan', vote: 'A', weight: 3 });
+    expect(node.voters[1].rationale).toBe('Density');
+  });
+
+  it('non-decision types keep RU headers (archtrace-native sections)', () => {
+    const { content } = generateAdrMarkdown({
+      id: '023',
+      title: 'Req native',
+      type: 'requirement',
+      parent: null,
+      cross_refs: [],
+      context: 'Req context',
+      requirements: '* R1 must',
+      constraints: '* C1',
+      acceptance: '* A1',
+      created: '2026-10-07',
+    });
+    expect(content).toContain('# Req native');
+    expect(content).toContain('## Контекст');
+    expect(content).toContain('## Требования');
+    expect(content).toContain('## Ограничения');
+    expect(content).toContain('## Критерии приёмки');
+    expect(content).not.toContain('## Context and Problem Statement');
+  });
+});
+
+describe('option-description isolation (## closes option)', () => {
+  it('legacy file: text after ## Решение / ## Последствия never lands in last option', () => {
+    const p = path.join(tmpDir, '900-legacy-solution-tail.md');
+    fs.writeFileSync(p, `---\nid: "900"\ntitle: "T"\nstatus: accepted\ntype: decision\nparent: null\ncross_refs: []\ncreated: 2026-10-08\n---\n\n# T\n\n## Опции\n\n### Option A: Alpha\n\nописание альфы\n\n### Option B: Beta\n\nстатус-кво — отклонено\n\n## Решение\n\nТекст решения\n\n## Последствия\n\nТекст последствий\n`, 'utf-8');
+    const node = parseDecisionFile(p)!;
+    expect(node.options).toHaveLength(2);
+    expect(node.options[1].description).toBe('статус-кво — отклонено');
+    expect(node.options[1].description).not.toContain('Текст решения');
+    expect(node.options[1].description).not.toContain('Текст последствий');
+    const s = parseBodySections(node.body);
+    expect(s.decision).toContain('Текст решения');
+    expect(s.consequences).toContain('Текст последствий');
+  });
+});
 
 describe('units', () => {
   it('normalizeStatus maps all MADR variants', () => {
