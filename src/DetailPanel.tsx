@@ -6,6 +6,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { DecisionNode, Comment, Vote, AdrInput } from './api';
+import { splitConsequences, type ConsequenceSegment, type Polarity } from './consequences';
 import {
   postComment, deleteCommentApi, castVoteApi, removeVoteApi, addCustomOptionApi, updateCustomOptionApi,
   updateCommentApi,
@@ -609,11 +610,33 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           )}
 
           {/* Tags */}
-          <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '6px', flexWrap: 'wrap' }}>
             <span style={{ padding: '2px 8px', borderRadius: '4px', background: statusColor(detail.status), fontSize: '11px', color: '#fff' }}>
               {STATUS_LABELS[detail.status] || detail.status}
             </span>
           </div>
+
+          {/* Deciders + decision date (MADR: Deciders / Date) */}
+          {(() => {
+            const deciders = typeof detail.extra?.['decision-makers'] === 'string'
+              ? (detail.extra['decision-makers'] as string).trim()
+              : typeof detail.extra?.['deciders'] === 'string'
+                ? (detail.extra['deciders'] as string).trim()
+                : '';
+            const fmt = (iso: string) => {
+              const d = new Date(iso);
+              return isNaN(d.getTime()) ? iso : d.toLocaleDateString('ru', { day: 'numeric', month: 'short', year: 'numeric' });
+            };
+            const bits: string[] = [];
+            if (detail.decided) bits.push(`📅 решено ${fmt(detail.decided)}`);
+            if (deciders) bits.push(`👥 ${deciders}`);
+            if (!bits.length) return null;
+            return (
+              <div style={{ fontSize: '11px', color: '#8c8c8c', marginBottom: '14px', marginTop: '-2px' }}>
+                {bits.join(' · ')}
+              </div>
+            );
+          })()}
 
           {/* КОНТЕКСТ */}
           <Section title="Контекст" accent="#1890ff"
@@ -1098,7 +1121,28 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             )}
           >
               <div style={{ fontSize: '13px', lineHeight: 1.6, color: '#333' }}>
-                <ReactMarkdown>{sections.consequences}</ReactMarkdown>
+                {(() => {
+                  const segs: ConsequenceSegment[] = splitConsequences(sections.consequences || '');
+                  const hasItems = segs.some(sg => sg.kind === 'item');
+                  if (!hasItems) return <ReactMarkdown>{sections.consequences}</ReactMarkdown>;
+                  const POL: Record<Polarity, { icon: string; color: string }> = {
+                    '+': { icon: '＋', color: '#389e0d' },
+                    '−': { icon: '－', color: '#cf1322' },
+                    '~': { icon: '≈', color: '#8c8c8c' },
+                  };
+                  return segs.map((sg, i) =>
+                    sg.kind === 'md' ? (
+                      sg.text.trim() ? <ReactMarkdown key={i}>{sg.text}</ReactMarkdown> : null
+                    ) : (
+                      <div key={i} style={{ display: 'flex', gap: '6px', padding: '2px 0', alignItems: 'baseline' }}>
+                        <span style={{ color: POL[sg.polarity].color, fontWeight: 'bold', flexShrink: 0 }}>
+                          {POL[sg.polarity].icon}
+                        </span>
+                        <span style={{ color: POL[sg.polarity].color === '#8c8c8c' ? '#595959' : '#333' }}>{sg.text}</span>
+                      </div>
+                    ),
+                  );
+                })()}
               </div>
             </Section>
           )}

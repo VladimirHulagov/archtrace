@@ -70,6 +70,8 @@ export interface DecisionNode {
   options: { letter: string; title: string }[];
   body: string;
   file: string;
+  /** Unknown frontmatter keys (MADR passthrough: tags, decision-makers...). */
+  extra?: Record<string, unknown>;
 }
 
 export interface Voter {
