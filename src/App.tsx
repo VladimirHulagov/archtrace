@@ -26,19 +26,24 @@ const STATUS_ICONS: Record<string, string> = {
 const TYPE_ICONS: Record<string, string> = { problem: '🔥', requirement: '📋', paradigm: '💡', decision: '⚙️', task: '🔨' };
 const VOTE_COLORS: Record<string, string> = { A: '#52c41a', B: '#fa8c16', C: '#1890ff', D: '#722ed1' };
 
-function decisionToTreeNode(d: DecisionNode): TreeNode {
+function voteDisplay(votersList: { vote: string; weight: number }[] | undefined) {
   let voteTally = '';
   let voteSectors: { option: string; weight: number; color: string }[] = [];
   let winnerVote: string | undefined;
 
-  if (d.voters?.length > 0) {
+  if (votersList && votersList.length > 0) {
     const tally: Record<string, number> = {};
-    for (const v of d.voters) { tally[v.vote] = (tally[v.vote] || 0) + v.weight; }
+    for (const v of votersList) { tally[v.vote] = (tally[v.vote] || 0) + v.weight; }
     voteTally = Object.entries(tally).sort((a, b) => b[1] - a[1]).map(([opt, w]) => `${opt}:${w}`).join(' ');
     voteSectors = Object.entries(tally).sort(([a], [b]) => a.localeCompare(b)).map(([opt, w]) => ({ option: opt, weight: w, color: VOTE_COLORS[opt] || '#8c8c8c' }));
     const sorted = Object.entries(tally).sort((a, b) => b[1] - a[1]);
     if (sorted.length > 0) winnerVote = sorted[0][0];
   }
+  return { voteTally, voteSectors, winnerVote };
+}
+
+function decisionToTreeNode(d: DecisionNode): TreeNode {
+  const { voteTally, voteSectors, winnerVote } = voteDisplay(d.voters);
 
   return {
     id: d.id, x: 0, y: 0, text: d.title, type: 'rich', status: d.status,
@@ -348,6 +353,21 @@ function App() {
     try { await deleteCommentApi(commentId); setComments(prev => prev.filter(c => c.id !== commentId)); }
     catch (err) { console.error('Failed to delete comment:', err); }
   }, []);
+
+  // Live vote sync: recompute the canvas card's sectors/winner from the panel's
+  // votes right after a cast/retract — otherwise the card only updates on page
+  // reload (graph re-fetch). Patches the node in place; layout/camera untouched.
+  useEffect(() => {
+    if (!selectedDetail) return;
+    const nodeId = selectedDetail.id;
+    setNodes(prev => prev.map(n => {
+      if (n.id !== nodeId) return n;
+      const { voteTally, voteSectors, winnerVote } = voteDisplay(
+        votes.map(v => ({ vote: v.option_letter, weight: v.weight })),
+      );
+      return { ...n, voteTally, voteSectors, winnerVote };
+    }));
+  }, [votes, selectedDetail]);
 
   const handleCastVote = useCallback(async (optionLetter: string) => {
     if (!selectedDetail) return;
