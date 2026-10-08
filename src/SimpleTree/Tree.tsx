@@ -373,7 +373,12 @@ export const Tree: React.FC<TreeProps> = ({
       // Resolve addressee from the item title: "... (→ 002)" / "... -> 002"
       const opt = (node.options || []).find(o => o.letter === letter);
       const tm = opt?.title.match(/[-=>»\s]{1,3}\s*(\d{2,4})\s*[,)]/) || opt?.title.match(/(?:→|->)\s*(\d{2,4})/);
-      if (!tm) return;
+      if (!tm) {
+        // No addressee: still highlight the row (local selection), just no line to follow.
+        setActiveTrace(prev => prev && prev.from === node.id && prev.letter === letter && !prev.to ? null : { from: node.id, to: '', letter });
+        announce(`${letter}: адресат не указан — выделен пункт`);
+        return;
+      }
       const targetId = tm[1];
       const edge = connections.find(c => c.from === node.id && c.to === targetId);
       if (!edge) { announce(`Для ${letter} нет прямой связи к узлу ${targetId}`); return; }
