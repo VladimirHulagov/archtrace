@@ -239,6 +239,8 @@ export interface Project {
   git_repo_url: string | null;
   git_branch: string;
   git_path: string;
+  /** Nodes in the project graph (dropdown badge); null = unknown → badge hidden */
+  node_count: number | null;
 }
 
 export async function fetchProjects(): Promise<Project[]> {

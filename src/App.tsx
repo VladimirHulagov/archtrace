@@ -647,7 +647,13 @@ function App() {
       {/* Project selector — top-left */}
       <div style={{ position: 'fixed', top: '12px', left: '16px', zIndex: 510 }}>
         <button
-          onClick={() => { setShowUserMenu(false); setShowProjectMenu(!showProjectMenu); }}
+          onClick={() => {
+            setShowUserMenu(false);
+            const opening = !showProjectMenu;
+            setShowProjectMenu(opening);
+            // Refresh list on open so node-count badges are fresh
+            if (opening) fetchProjects().then(ps => setProjects(ps)).catch(() => {});
+          }}
           style={{
             border: '1px solid #d0d0d0', background: '#fff', borderRadius: '4px',
             padding: '6px 14px', cursor: 'pointer', fontSize: '13px', color: '#333',
@@ -662,7 +668,9 @@ function App() {
             position: 'absolute', top: '100%', left: 0, marginTop: '4px',
             background: '#fff', border: '1px solid #e0e0e0', borderRadius: '4px',
             boxShadow: '0 4px 12px rgba(0,0,0,0.1)', minWidth: '260px', overflow: 'hidden',
+            display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 80px)',
           }}>
+            <div style={{ overflowY: 'auto', minHeight: 0, flex: 1 }}>
             {projects.map(p => (
               <div key={p.id} onClick={() => handleProjectSwitch(p)} style={{
                 padding: '10px 14px', cursor: 'pointer',
@@ -675,6 +683,13 @@ function App() {
                   <div style={{ fontWeight: 'bold' }}>{p.name}</div>
                   {p.description && <div style={{ fontSize: '11px', color: '#999' }}>{p.description}</div>}
                 </div>
+                {p.node_count != null && (
+                  <span title="узлов в графе" style={{
+                    fontSize: '11px', lineHeight: '16px', color: '#888', background: '#f0f0f0',
+                    borderRadius: '9px', padding: '1px 8px', flexShrink: 0,
+                    fontVariantNumeric: 'tabular-nums',
+                  }}>{p.node_count}</span>
+                )}
                 <button
                   onClick={(e) => { e.stopPropagation(); setDeletingProject(p); }}
                   title={`Удалить «${p.name}»`}
@@ -687,8 +702,9 @@ function App() {
                 >🗑</button>
               </div>
             ))}
+            </div>
             <div onClick={() => { setShowNewProjectModal(true); setShowProjectMenu(false); }} style={{
-              padding: '10px 14px', cursor: 'pointer',
+              padding: '10px 14px', cursor: 'pointer', flexShrink: 0,
               background: '#f6ffed', fontSize: '13px', color: '#389e0d',
               fontWeight: 'bold', borderTop: '1px solid #d9f7be',
             }}>
@@ -768,12 +784,14 @@ function App() {
           onCommentsChange={setComments}
           onVotesChange={setVotes}
           onOptionsChange={() => {
-            // Refetch detail to get updated options from MD
+            // Refetch detail to get updated options from MD, then redraw graph nodes
             if (selectedDetail) {
               fetch(`/api/decisions/${selectedDetail.id}?projectId=${currentProject?.id || 1}`)
                 .then(r => r.json())
                 .then(data => { if (data && data.id) setSelectedDetail(data); })
                 .catch(() => {});
+              // Redraw canvas cards: options/symptoms changed on the server
+              reloadGraph();
             }
           }}
           onTitleChange={(newTitle) => {

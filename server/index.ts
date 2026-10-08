@@ -790,6 +790,37 @@ function graphFromRef(req: express.Request): Promise<{ graph: any; tempDir: stri
 const graphCache = new Map<number, { graph: any; timestamp: number }>();
 const GRAPH_CACHE_TTL = 5000; // 5 seconds
 
+// Node-count cache for project list badges: { projectId → { count, timestamp } }
+const nodeCountCache = new Map<number, { count: number; timestamp: number }>();
+const NODE_COUNT_TTL = 5000; // 5 seconds
+
+/**
+ * Node count of a project's current graph (dropdown badge).
+ * Returns null when not cheaply available (clone not on disk yet, parse
+ * error) — the frontend then hides the badge instead of showing a wrong 0.
+ */
+async function getNodeCount(project: any): Promise<number | null> {
+  const pid = project.id;
+  const cached = nodeCountCache.get(pid);
+  if (cached && Date.now() - cached.timestamp < NODE_COUNT_TTL) return cached.count;
+  try {
+    // Never trigger a fresh git clone just for a badge: count only when the
+    // per-project clone already exists on disk (projects without a repo
+    // resolve to a local dir and are always cheap).
+    if (project.git_repo_url) {
+      const cloneDir = path.resolve(__dirname, '..', `git-data-${pid}`);
+      if (!fs.existsSync(path.join(cloneDir, '.git'))) return null;
+    }
+    const dir = await projectDecisionsDir(pid);
+    const graph = buildGraph(dir);
+    const count = graph.nodes.length;
+    nodeCountCache.set(pid, { count, timestamp: Date.now() });
+    return count;
+  } catch {
+    return null;
+  }
+}
+
 app.get('/api/graph', async (req, res) => {
   let tempDir: string | null = null;
   try {
@@ -843,8 +874,8 @@ app.get('/api/graph', async (req, res) => {
 
 // Invalidate graph cache when a decision is created/updated/deleted
 function invalidateGraphCache(projectId?: number) {
-  if (projectId) graphCache.delete(projectId);
-  else graphCache.clear();
+  if (projectId) { graphCache.delete(projectId); nodeCountCache.delete(projectId); }
+  else { graphCache.clear(); nodeCountCache.clear(); }
 }
 
 app.get('/api/decisions/:id', async (req, res) => {
@@ -1098,7 +1129,11 @@ app.post('/api/options/:nodeId', requireAuth, async (req, res) => {
 app.get('/api/projects', async (_req, res) => {
   try {
     const projects = await getProjects();
-    res.json(projects);
+    const withCounts = await Promise.all(projects.map(async (p: any) => ({
+      ...p,
+      node_count: await getNodeCount(p),
+    })));
+    res.json(withCounts);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
